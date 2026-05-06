@@ -1,0 +1,73 @@
+dia
+Copyright the dia authors
+
+This product is dual-licensed under MIT OR Apache-2.0 (caller's choice).
+See LICENSE-MIT and LICENSE-APACHE for those terms.
+
+────────────────────────────────────────────────────────────────────────
+
+This product incorporates third-party model files. Downstream
+redistributors of any binary linking `dia` MUST reproduce the
+attributions below.
+
+────────────────────────────────────────────────────────────────────────
+1. pyannote/segmentation-3.0 (bundled when feature `bundled-segmentation`
+   is enabled, which is the default)
+
+Embedded in the dia binary via `include_bytes!` (see
+`src/segment/model.rs::SegmentModel::bundled`):
+
+  models/segmentation-3.0.onnx     (5.99 MB; pyannote speaker-segmentation
+                                    model)
+
+Source:
+  HuggingFace pyannote/segmentation-3.0
+  https://huggingface.co/pyannote/segmentation-3.0
+
+License: MIT
+  Copyright (c) 2023 CNRS
+  Hervé Bredin (CNRS / IRIT) — pyannote.audio author and lead trainer.
+
+For the SHA-256 of the bundled file and the refresh procedure see
+`models/SOURCE.md`.
+
+────────────────────────────────────────────────────────────────────────
+2. pyannote/speaker-diarization-community-1 PLDA weights
+
+Embedded in the dia binary via `include_bytes!` (see
+`src/plda/loader.rs`):
+
+  models/plda/{mean1,mean2,lda,mu,tr,psi}.bin
+  models/plda/{eigenvectors_desc,phi_desc}.bin
+                                    (raw f64 extractions / scipy-derived
+                                     eigenvectors, compiled into the
+                                     binary)
+  models/plda/xvec_transform.npz   (134 KB; build-time source for mean1,
+                                    mean2, lda)
+  models/plda/plda.npz             (134 KB; build-time source for mu,
+                                    tr, psi)
+
+Source:
+  HuggingFace pyannote/speaker-diarization-community-1
+  https://huggingface.co/pyannote/speaker-diarization-community-1
+  Snapshot revision: 3533c8cf8e369892e6b79ff1bf80f7b0286a54ee
+
+License: CC-BY-4.0
+  https://creativecommons.org/licenses/by/4.0/
+
+Attribution (per upstream `plda/README.md` in the snapshot):
+  PLDA model trained by BUT Speech@FIT (https://speech.fit.vut.cz/).
+  Integration of VBx in pyannote.audio by Jiangyu Han and Petr Pálka.
+
+For the full provenance — including the original .npz layout, the
+internal array keys, and the refresh procedure — see
+`models/plda/SOURCE.md` in this repository.
+
+────────────────────────────────────────────────────────────────────────
+3. WeSpeaker ResNet34-LM embedding model (NOT bundled)
+
+The 27 MB ONNX export exceeds the crates.io 10 MB hard limit and is
+therefore NOT shipped with the crate. Callers obtain it via
+`scripts/download-embed-model.sh` (Apache-2.0 source from the
+WeSpeaker project; ONNX export from the `onnx-community` HuggingFace
+organization).

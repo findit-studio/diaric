@@ -1,0 +1,17 @@
+{
+  "pyannote_audio_version": "4.0.4",
+  "numpy_version": "2.4.4",
+  "clip_path": "/Users/user/Develop/findit-studio/dia/tests/parity/fixtures/02_pyannote_sample/clip_16k.wav",
+  "clip_sha256": "c319b4abca767b124e41432d364fd7df006cb26bb79d09326c487d606a134e6e",
+  "artifacts": {
+    "raw_embeddings.npz": "8e53f1d48935aae925f12cfe95d37198b97b99365a2b3dc6163fb88526f0bd34",
+    "segmentations.npz": "082a380944c119fb7a30ab4673eef20655eeb62e6cf2cc105ff3aa13f72f774e",
+    "plda_embeddings.npz": "c112f97c65877f03528c2c83d6700a3e3f4ebc4d68488033b3c5c53d3a5b454b",
+    "ahc_init_labels.npy": "1f913a4168c2cee7a4d3f53b5e312e3534efd4b0a29987e9f849ea436121ba06",
+    "ahc_state.npz": "3f2dec149623a5ef4af8c6e705ad6e0a7eb4aa80aced883b9c9fea4382d30673",
+    "vbx_state.npz": "0a108a6e3a28384967d197c46ca4b4294c12f64f789599bca9c7898cd62c7084",
+    "clustering.npz": "5fb44c86ec2880c11f8aa78374fd42638a047a5f707b61b3995d7cb64e8d8149",
+    "reconstruction.npz": "77da681cd58c9854c0c2533b20a70533baa7a7ff89641f7de18664441698fce7",
+    "reference.rttm": "5ca531fa0f61d67f03595a81254925c8c64d58cd23e297322f8a3784704e5909"
+  }
+}
