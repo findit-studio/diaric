@@ -33,9 +33,14 @@ pub enum ShapeError {
 /// Specific non-finite reasons for [`Error::NonFinite`].
 #[derive(Debug, Error, Clone, Copy, PartialEq)]
 pub enum NonFiniteError {
-  /// `soft_clusters` contains `+inf` or `-inf` — the solver cannot
-  /// compute a meaningful argmax against an infinite cost.
-  #[error("soft_clusters contains +inf or -inf")]
+  /// `soft_clusters` contains a non-finite value (`+inf`, `-inf`, or
+  /// `NaN`). The Hungarian boundary in `constrained_argmax` only ever
+  /// emits this variant on `±inf`, but the LSAP layer underneath
+  /// rejects any non-finite input — `+inf` overflows the dual-update
+  /// arithmetic and `NaN` poisons the running min comparisons. The
+  /// variant name is preserved for backward compatibility with the
+  /// public enum shape; the renamed message reflects the wider check.
+  #[error("soft_clusters contains a non-finite value (+inf, -inf, or NaN)")]
   InfInSoftClusters,
   /// `soft_clusters` is entirely NaN — no finite value is available
   /// as the `nanmin` replacement that pyannote uses.

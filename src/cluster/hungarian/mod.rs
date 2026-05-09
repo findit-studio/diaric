@@ -10,6 +10,7 @@
 
 mod algo;
 mod error;
+mod lsap;
 
 #[cfg(test)]
 mod tests;

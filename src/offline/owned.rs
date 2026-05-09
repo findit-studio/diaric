@@ -126,7 +126,12 @@ const fn default_max_iters() -> usize {
 }
 #[cfg(feature = "serde")]
 const fn default_smoothing_epsilon() -> Option<f32> {
-  Some(0.1)
+  // Match pyannote's plain top-k argmax for bit-exact community-1
+  // parity. Speakrs-style temporal smoothing (`Some(eps)`) is opt-in
+  // via `with_smoothing_epsilon` for callers who want streaming-
+  // friendly stable speaker assignments at the cost of segment
+  // boundary precision.
+  None
 }
 
 impl OwnedPipelineOptions {
@@ -142,7 +147,15 @@ impl OwnedPipelineOptions {
       fb: 0.8,
       max_iters: 20,
       min_duration_off: 0.0,
-      smoothing_epsilon: Some(0.1),
+      // `None` matches pyannote's plain top-k argmax in the discrete
+      // diarization grid (`pyannote.audio.pipelines.utils.diarization
+      // .Diarization.to_diarization`, line 261-266) — needed for
+      // bit-exact RTTM segment boundaries on community-1. Callers
+      // that want streaming-friendly stable speaker assignments
+      // (speakrs-style) can opt in via
+      // `with_smoothing_epsilon(Some(eps))` at the cost of merging
+      // sub-100ms overlap-region splits.
+      smoothing_epsilon: None,
       spill_options: SpillOptions::new(),
     }
   }
@@ -491,6 +504,23 @@ impl OwnedDiarizationPipeline {
       crate::ops::spill::SpillBytesMut::<f32>::zeros(emb_len, cfg.spill_options())?;
     let embs = raw_embeddings.as_mut_slice();
 
+    // Pyannote's `get_embeddings` (community-1 default
+    // `embedding_exclude_overlap=True`) zeroes out frames where two or
+    // more speakers are simultaneously active before extracting each
+    // speaker's embedding, then falls back to the original mask only
+    // when too few "clean" frames remain. The threshold is
+    // `min_num_frames = ceil(num_frames * embedding_min_num_samples /
+    // (chunk_duration * embedding_sample_rate)) = ceil(589 * 400 /
+    // (10 * 16000)) = 2` for the WeSpeaker pyannote ships. Without
+    // this exclusion dia's per-(chunk, speaker) embedding mixes the
+    // overlap region's competing speakers into a single vector,
+    // producing a centroid that's halfway between the two real
+    // speakers and flipping AHC threshold decisions on long
+    // recordings.
+    //
+    // pyannote/audio/pipelines/speaker_diarization.py:375-397.
+    const EXCLUDE_OVERLAP_MIN_FRAMES: usize = 2;
+
     for c in 0..num_chunks {
       let start = c * step;
       // Re-slice the same padded window we used for segmentation so
@@ -501,6 +531,21 @@ impl OwnedDiarizationPipeline {
       let n = end - lo;
       if n > 0 {
         padded_chunk[..n].copy_from_slice(&samples[lo..end]);
+      }
+
+      // Per-frame "clean" indicator: 1 iff fewer than 2 speakers are
+      // active in this frame across the full SLOTS_PER_CHUNK = 3 slots.
+      // Computed once per chunk and reused across each speaker's
+      // overlap-excluded mask construction.
+      let mut clean_frame = [false; FRAMES_PER_WINDOW];
+      for f in 0..FRAMES_PER_WINDOW {
+        let mut active_count = 0u8;
+        for s in 0..SLOTS_PER_CHUNK {
+          if segs[(c * FRAMES_PER_WINDOW + f) * SLOTS_PER_CHUNK + s] >= cfg.onset() as f64 {
+            active_count += 1;
+          }
+        }
+        clean_frame[f] = active_count < 2;
       }
 
       for s in 0..SLOTS_PER_CHUNK {
@@ -525,6 +570,26 @@ impl OwnedDiarizationPipeline {
           continue;
         }
 
+        // Build overlap-excluded clean mask + count clean-active
+        // frames. Match pyannote's exact rule: use the clean mask only
+        // when its active-frame count strictly exceeds
+        // `EXCLUDE_OVERLAP_MIN_FRAMES = 2`. The strict-greater-than
+        // here matters — pyannote uses `np.sum(clean_mask) >
+        // min_num_frames`, not `>=`, so an exactly-2-frame clean
+        // mask falls back to the full mask just like dia does here.
+        let mut used_mask = [false; FRAMES_PER_WINDOW];
+        let mut clean_count = 0usize;
+        for f in 0..FRAMES_PER_WINDOW {
+          let v = frame_mask[f] && clean_frame[f];
+          used_mask[f] = v;
+          if v {
+            clean_count += 1;
+          }
+        }
+        if clean_count <= EXCLUDE_OVERLAP_MIN_FRAMES {
+          used_mask = frame_mask;
+        }
+
         // Run pyannote-style chunk + frame-mask embedding. The
         // EmbedModel's `embed_chunk_with_frame_mask` dispatches based
         // on the active backend: ORT zeroes audio + sliding-window
@@ -532,7 +597,7 @@ impl OwnedDiarizationPipeline {
         // to the TorchScript wrapper which delegates to pyannote's
         // `WeSpeakerResNet34.forward(waveforms, weights=mask)` —
         // bit-exact pyannote.
-        let raw = match embed_model.embed_chunk_with_frame_mask(&padded_chunk, &frame_mask) {
+        let raw = match embed_model.embed_chunk_with_frame_mask(&padded_chunk, &used_mask) {
           Ok(v) => v,
           Err(crate::embed::Error::InvalidClip { .. })
           | Err(crate::embed::Error::DegenerateEmbedding) => {

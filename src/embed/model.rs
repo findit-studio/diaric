@@ -399,6 +399,17 @@ pub struct EmbedModel {
   backend: Box<dyn EmbedBackend>,
 }
 
+// Manual `Debug` so callers can `dbg!()` / `{:?}`-format an
+// `EmbedModel` (and propagate `Debug` through `Result<EmbedModel, _>`
+// in `unwrap_err` diagnostics). The inner `EmbedBackend` trait object
+// holds an ORT session / TorchScript module — neither has a useful
+// `Debug` impl, so we just print the wrapper name.
+impl core::fmt::Debug for EmbedModel {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("EmbedModel").finish_non_exhaustive()
+  }
+}
+
 impl EmbedModel {
   /// Load the ONNX model from disk with default options.
   ///
@@ -1109,6 +1120,56 @@ mod tests {
     assert!(
       matches!(r, Err(Error::NonFiniteInput)),
       "NaN sample: got {r:?}"
+    );
+  }
+
+  /// `embed_weighted` must surface [`Error::AllSilent`] when every
+  /// per-window weight is below `NORM_EPSILON`. Without this guard,
+  /// the post-aggregation L2 normalize would either divide by ~0
+  /// (`DegenerateEmbedding`) or pass a noise-floor unit vector
+  /// downstream — both are wrong for "silent input".
+  ///
+  /// Two paths must be covered:
+  ///   1. Single-window (`samples.len() <= EMBED_WINDOW_SAMPLES`):
+  ///      the weight is `voice_probs.iter().sum() / len`.
+  ///   2. Multi-window: the guard checks `total_weight` summed across
+  ///      `plan_starts`.
+  #[test]
+  #[ignore = "requires WeSpeaker ResNet34-LM ONNX model"]
+  fn embed_weighted_rejects_all_silent() {
+    let path = model_path();
+    if !path.exists() {
+      return;
+    }
+    let mut model = EmbedModel::from_file(&path).expect("load model");
+
+    // Single-window path: 2s clip, all-zero voice probabilities.
+    let samples = vec![0.001f32; EMBED_WINDOW_SAMPLES as usize];
+    let probs = vec![0.0f32; samples.len()];
+    let r = model.embed_weighted(&samples, &probs);
+    assert!(
+      matches!(r, Err(Error::AllSilent)),
+      "single-window all-zero weights must surface AllSilent, got {r:?}"
+    );
+
+    // Multi-window path: 6s clip → 3 sliding windows, all-zero weights.
+    let samples = vec![0.001f32; (EMBED_WINDOW_SAMPLES as usize) * 3];
+    let probs = vec![0.0f32; samples.len()];
+    let r = model.embed_weighted(&samples, &probs);
+    assert!(
+      matches!(r, Err(Error::AllSilent)),
+      "multi-window all-zero weights must surface AllSilent, got {r:?}"
+    );
+
+    // Sub-epsilon-but-nonzero weights (well below NORM_EPSILON = 1e-12
+    // per `embed::options::NORM_EPSILON`) — still AllSilent. Picking
+    // 1e-15 puts total_weight at ~5e-15 across 5 sliding windows,
+    // safely below the threshold.
+    let probs = vec![1e-15f32; samples.len()];
+    let r = model.embed_weighted(&samples, &probs);
+    assert!(
+      matches!(r, Err(Error::AllSilent)),
+      "sub-epsilon weights must surface AllSilent, got {r:?}"
     );
   }
 

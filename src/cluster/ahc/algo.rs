@@ -223,22 +223,17 @@ fn l2_normalize_to_row_major(
 /// downstream clustering correctness (the labels are arbitrary
 /// integers naming the buckets; DER is invariant to relabeling).
 ///
-/// **TODO**: if a future end-to-end parity test runs
-/// `ahc_init → build qinit → vbx_iterate → q_final` and compares
-/// element-wise against captured `q_final`, the `qinit` column ordering
-/// will not match (since our labels are a permutation of scipy's). At
-/// that point, choose one of:
-/// 1. Implement scipy's exact tree-traversal label order here (drop
-///    this canonicalization pass; align DFS push order with scipy's
-///    `_hierarchy.pyx::cluster_dist`).
-/// 2. Compare `q_final` modulo column permutation (mathematically
-///    equivalent — the permutation is recoverable from
-///    `(our_labels, scipy_labels)` matching).
-/// 3. Have `ahc_init` return `(labels, permutation_to_scipy)` so the
-///    caller can build the column-permuted qinit explicitly.
+/// # Element-wise q_final parity (not enforced)
 ///
-/// Either way, the contract here is "produce a valid scipy-equivalent
-/// partition", and the existing parity test enforces that.
+/// Switching the parity oracle from partition-equivalence to element-wise
+/// `q_final` would expose this label-permutation gap (qinit columns would
+/// not align). The realistic input distribution and downstream DER are
+/// invariant to relabeling, so this is intentionally not enforced. If a
+/// future test pins element-wise `q_final`, three remediation paths are
+/// available: (1) port scipy's tree-traversal DFS push order verbatim;
+/// (2) compare modulo column permutation recoverable from
+/// `(our_labels, scipy_labels)`; (3) return the permutation alongside
+/// labels and let the caller build a column-permuted qinit.
 fn fcluster_distance_remap(steps: &[Step<f64>], n: usize, threshold: f64) -> Vec<usize> {
   // Single leaf — no merges; one cluster.
   if n == 1 {
@@ -279,18 +274,29 @@ fn fcluster_distance_remap(steps: &[Step<f64>], n: usize, threshold: f64) -> Vec
     }
   }
 
-  // Second pass: scan leaves 0..n and assign encounter-order labels.
-  let mut canonical = vec![0usize; n];
-  let mut next_label = 0usize;
-  let mut label_of_class: HashMap<usize, usize> = HashMap::new();
-  for (i, slot) in canonical.iter_mut().enumerate() {
-    *slot = *label_of_class.entry(raw[i]).or_insert_with(|| {
-      let l = next_label;
-      next_label += 1;
-      l
-    });
-  }
-  canonical
+  // Second pass: `np.unique(raw, return_inverse=True)`-equivalent
+  // canonicalization. Pyannote feeds scipy's `fcluster - 1` through
+  // `np.unique(..., return_inverse=True)` (clustering.py:603-604), which
+  // sorts the distinct DFS-pass labels ascending and remaps each row's
+  // label to its rank in that sorted unique set. The previous
+  // leaf-scan encounter-order canonicalization preserved partition
+  // equivalence but not the label *values*; a downstream caller
+  // (pipeline `assign_embeddings`) builds qinit columns indexed by
+  // these labels, so a value mismatch here produced a column-permuted
+  // qinit, which cascaded into VBx convergence to a different fixed
+  // point on long fixtures (06_long_recording, testaudioset 09/10
+  // and friends). Sorting by raw DFS value matches `np.unique` and
+  // restores bit-exact qinit, q_final, centroid, soft, and
+  // hard_clusters parity downstream.
+  let mut unique_sorted: Vec<usize> = raw.clone();
+  unique_sorted.sort_unstable();
+  unique_sorted.dedup();
+  let value_to_new: HashMap<usize, usize> = unique_sorted
+    .iter()
+    .enumerate()
+    .map(|(i, &v)| (v, i))
+    .collect();
+  raw.iter().map(|v| value_to_new[v]).collect()
 }
 
 /// Recursively assign `label` to every leaf reachable from `node`.

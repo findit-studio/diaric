@@ -65,7 +65,7 @@ pub mod spill;
 pub use dispatch::axpy_f32;
 #[cfg(feature = "_bench")]
 pub use dispatch::pdist_euclidean;
-pub use dispatch::{axpy, dot, logsumexp_row};
+pub use dispatch::{axpy, dot, kahan_dot, kahan_sum, logsumexp_row};
 
 // ─── runtime CPU-feature detection ───────────────────────────────────
 //
@@ -146,6 +146,22 @@ mod backend_selection_tests {
       "diarization_assert_avx2 set but avx512_available() == true; \
        dispatcher would pick AVX-512 instead of the AVX2 backend we want \
        to exercise — check `--cfg diarization_disable_avx512` is in RUSTFLAGS"
+    );
+  }
+
+  /// Only fires under the native arm64 NEON CI job. Asserts the
+  /// dispatcher would pick NEON. Without this, a CPUID/runner-image
+  /// regression could silently fall the unsafe NEON kernels back to
+  /// scalar and leave them untested. Mirrors the AVX SDE assertion
+  /// pattern; CI sets `--cfg diarization_assert_neon` on the arm64
+  /// fbank job.
+  #[test]
+  #[cfg(all(target_arch = "aarch64", diarization_assert_neon))]
+  fn dispatch_selects_neon_under_native_arm64() {
+    assert!(
+      super::neon_available(),
+      "diarization_assert_neon set but neon_available() == false; \
+       runner regression would silently route SIMD tests through scalar"
     );
   }
 }
@@ -396,5 +412,66 @@ mod differential_tests {
         "axpy[{i}] scalar/SIMD not bit-identical (s={s}, v={v})"
       );
     }
+  }
+
+  /// Kahan/Neumaier reduction is **not** bit-identical between scalar
+  /// and NEON — the scalar path sees all `n` products in serial order
+  /// while NEON splits across 2 lanes and combines at the end. Both
+  /// produce `O(ε)`-bounded results regardless of summation order
+  /// (the whole point of using Neumaier for VBx GEMM); this test
+  /// pins the agreement bound rather than bit-equality.
+  #[test]
+  fn kahan_dot_scalar_simd_within_neumaier_bound() {
+    for d in [4usize, 16, 64, 128, 192, 256, 1031] {
+      let mut rng = ChaCha20Rng::seed_from_u64(0xc0ffee + d as u64);
+      let a: Vec<f64> = (0..d).map(|_| rng.random::<f64>() * 2.0 - 1.0).collect();
+      let b: Vec<f64> = (0..d).map(|_| rng.random::<f64>() * 2.0 - 1.0).collect();
+      let s = super::scalar::kahan_dot(&a, &b);
+      let v = super::dispatch::kahan_dot(&a, &b);
+      let abs_err = (s - v).abs();
+      // 8ε bound: per-lane Neumaier is `O(ε)`, the 2→1 cross-lane
+      // combine adds another Neumaier step. 8ε is a conservative
+      // ceiling; well-conditioned inputs land 100× tighter.
+      assert!(
+        abs_err <= 8.0 * f64::EPSILON * s.abs().max(1.0),
+        "kahan_dot d={d} scalar/SIMD diff {abs_err:e} exceeds 8ε bound (s={s}, v={v})"
+      );
+    }
+  }
+
+  /// Companion guard for `kahan_sum`. Same Neumaier bound as
+  /// `kahan_dot_scalar_simd_within_neumaier_bound`.
+  #[test]
+  fn kahan_sum_scalar_simd_within_neumaier_bound() {
+    for d in [4usize, 17, 200, 1004] {
+      let mut rng = ChaCha20Rng::seed_from_u64(0xbeef + d as u64);
+      let xs: Vec<f64> = (0..d).map(|_| rng.random::<f64>() * 2.0 - 1.0).collect();
+      let s = super::scalar::kahan_sum(&xs);
+      let v = super::dispatch::kahan_sum(&xs);
+      let abs_err = (s - v).abs();
+      assert!(
+        abs_err <= 8.0 * f64::EPSILON * s.abs().max(1.0),
+        "kahan_sum d={d} scalar/SIMD diff {abs_err:e} exceeds 8ε bound"
+      );
+    }
+  }
+
+  /// Catastrophic cancellation: Neumaier-summed paths must recover
+  /// the small terms regardless of summation order. Both scalar and
+  /// SIMD should report the true sum to high accuracy on the
+  /// adversarial `[1e16, 1, -1e16, 1]` input.
+  #[test]
+  fn kahan_recovers_catastrophic_cancellation() {
+    let xs: Vec<f64> = vec![1e16, 1.0, -1e16, 1.0];
+    let s = super::scalar::kahan_sum(&xs);
+    let v = super::dispatch::kahan_sum(&xs);
+    assert!(
+      (s - 2.0).abs() < 1e-10,
+      "scalar kahan_sum lost the small terms: {s}"
+    );
+    assert!(
+      (v - 2.0).abs() < 1e-10,
+      "SIMD kahan_sum lost the small terms: {v}"
+    );
   }
 }

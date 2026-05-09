@@ -45,8 +45,20 @@ mod tests;
 
 // Compile-time trait assertions. Catches a future field-type change that
 // would silently regress Send/Sync auto-derive on the public types.
+//
+// The submodule error types and `vbx::VbxOutput` (which wraps
+// nalgebra's `DMatrix<f64>`) are also asserted here so a future
+// refactor that adds a non-Send/Sync field (e.g. `Rc`, raw pointer)
+// fails compilation at the type definition rather than only at the
+// downstream `async`/`thread::spawn` call sites.
 const _: fn() = || {
   fn assert_send_sync<T: Send + Sync>() {}
   assert_send_sync::<OfflineClusterOptions>();
   assert_send_sync::<Error>();
+  assert_send_sync::<ahc::Error>();
+  assert_send_sync::<vbx::Error>();
+  assert_send_sync::<hungarian::Error>();
+  assert_send_sync::<centroid::Error>();
+  assert_send_sync::<vbx::VbxOutput>();
+  assert_send_sync::<vbx::StopReason>();
 };

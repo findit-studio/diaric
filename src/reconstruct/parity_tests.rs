@@ -84,16 +84,11 @@ fn reconstruct_matches_pyannote_discrete_diarization_05_four_speaker() {
   run_reconstruct_parity("05_four_speaker");
 }
 
-/// 06_long_recording: bit-exact discrete grid match is `#[ignore]`d
-/// because chunk-level cluster IDs diverge from pyannote's at T=1004
-/// (see `pipeline::parity_tests::assign_embeddings_matches_pyannote_hard_clusters_06_long_recording`).
-/// CI coverage moved to
-/// [`reconstruct_within_tolerance_06_long_recording`] below — same
-/// data flow, but compares per-frame discrete labels under a
-/// Hungarian-optimal cluster permutation with a bounded mismatch
-/// fraction.
+/// 06_long_recording (T=1004) — bit-exact discrete-grid parity.
+/// Restored by Kahan-summed VBx + `np.unique`-equivalent AHC
+/// canonicalization (see
+/// `pipeline::parity_tests::assign_embeddings_matches_pyannote_hard_clusters_06_long_recording`).
 #[test]
-#[ignore = "T=1004 GEMM-roundoff partition drift; CI coverage in reconstruct_within_tolerance_06_long_recording"]
 fn reconstruct_matches_pyannote_discrete_diarization_06_long_recording() {
   run_reconstruct_parity("06_long_recording");
 }

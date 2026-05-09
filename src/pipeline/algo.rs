@@ -295,31 +295,24 @@ impl<'a> AssignEmbeddingsInput<'a> {
 /// [`crate::cluster::hungarian::UNMATCHED`] = `-2` for speakers with no
 /// surviving cluster.
 ///
-/// # Speaker-count constraints (currently unsupported)
+/// # Speaker-count constraints (deferred — auto-VBx only)
 ///
-/// Pyannote's `cluster_vbx` (`clustering.py:617-633`) supports
-/// `num_clusters` / `min_clusters` / `max_clusters` constraints by
-/// running a KMeans fallback over the L2-normalized training
-/// embeddings *after* VBx, when auto-VBx's cluster count violates
-/// the constraints. This Rust port currently only exposes the
-/// auto-VBx path — there is no `num_clusters` field in
-/// [`AssignEmbeddingsInput`]. All five captured fixtures used the
-/// auto path, so existing parity tests are unaffected, but any
-/// caller that needs a forced speaker count must either
-/// post-process VBx output or wait for this feature to land.
+/// Pyannote's `cluster_vbx` (`clustering.py:617-633`) accepts
+/// `num_clusters` / `min_clusters` / `max_clusters` knobs and runs a
+/// KMeans fallback over the L2-normalized training embeddings *after*
+/// VBx when auto-VBx's count violates the constraints. This Rust port
+/// only exposes the auto-VBx path — there is no `num_clusters` field on
+/// [`AssignEmbeddingsInput`] and no caller currently requests forced
+/// counts. All captured parity fixtures use the auto path.
 ///
-/// **TODO**: add
-/// `num_clusters: Option<usize>`, `min_clusters: Option<usize>`,
-/// `max_clusters: Option<usize>` to the input struct and port
-/// pyannote's KMeans branch when an auto-VBx count violates the
-/// constraints. Adding it will require:
-///   1. A k-means++ implementation (or a `linfa-clustering` dep) on
-///      L2-normalized embeddings — pyannote uses sklearn's KMeans
-///      with `n_init=3, random_state=42`.
-///   2. Centroid recomputation from the KMeans cluster assignment.
-///   3. Disabling `constrained_assignment` in this branch (pyannote
-///      does this to avoid artificial cluster inflation).
-///   4. A new fixture captured with `num_clusters` forcing != auto.
+/// To re-enable the KMeans branch later, the work is: add the three
+/// `Option<usize>` knobs to the input struct; port a k-means++ +
+/// multi-restart KMeans matching sklearn's
+/// `KMeans(n_init=3, random_state=42)` on L2-normalized embeddings;
+/// recompute centroids from the KMeans assignment; disable
+/// `constrained_assignment` in this branch (pyannote does this to
+/// avoid artificial cluster inflation); capture a new fixture with
+/// forced != auto.
 pub fn assign_embeddings(
   input: &AssignEmbeddingsInput<'_>,
 ) -> Result<Arc<[ChunkAssignment]>, Error> {

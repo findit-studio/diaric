@@ -64,6 +64,83 @@ where
 }
 
 #[test]
+#[ignore = "ad-hoc capture; localizes pyannote VBx parity on 10_mrbeast_clean_water"]
+fn vbx_iterate_matches_pyannote_q_final_pi_elbo_10_mrbeast() {
+  // Adapter: call run_vbx_parity on a different fixture. 01_dialogue
+  // has T=195 (single chunk), 10_mrbeast_clean_water has T=611 — large
+  // enough to expose VBx GEMM drift if it's the divergence source for
+  // the testaudioset bench's segment-count differences.
+  run_vbx_parity_for_fixture("10_mrbeast_clean_water");
+}
+
+fn run_vbx_parity_for_fixture(fixture_dir: &str) {
+  let plda_path = fixture(&format!(
+    "tests/parity/fixtures/{fixture_dir}/plda_embeddings.npz"
+  ));
+  let (post_plda_flat, post_plda_shape) = read_npz_array::<f64>(&plda_path, "post_plda");
+  assert_eq!(post_plda_shape.len(), 2);
+  let t = post_plda_shape[0] as usize;
+  let d = post_plda_shape[1] as usize;
+  assert_eq!(d, 128);
+  let x = DMatrix::<f64>::from_row_slice(t, d, &post_plda_flat);
+
+  let (phi_flat, _) = read_npz_array::<f64>(&plda_path, "phi");
+  let phi = DVector::<f64>::from_vec(phi_flat);
+
+  let vbx_path = fixture(&format!(
+    "tests/parity/fixtures/{fixture_dir}/vbx_state.npz"
+  ));
+  let (qinit_flat, qinit_shape) = read_npz_array::<f64>(&vbx_path, "qinit");
+  let s = qinit_shape[1] as usize;
+  let qinit = DMatrix::<f64>::from_row_slice(t, s, &qinit_flat);
+
+  let (fa_flat, _) = read_npz_array::<f64>(&vbx_path, "fa");
+  let (fb_flat, _) = read_npz_array::<f64>(&vbx_path, "fb");
+  let (max_iters_flat, _) = read_npz_array::<i64>(&vbx_path, "max_iters");
+  let fa = fa_flat[0];
+  let fb = fb_flat[0];
+  let max_iters = max_iters_flat[0] as usize;
+
+  let out = vbx_iterate(x.as_view(), &phi, &qinit, fa, fb, max_iters).expect("vbx_iterate");
+
+  let (q_final_flat, _) = read_npz_array::<f64>(&vbx_path, "q_final");
+  let q_final = DMatrix::<f64>::from_row_slice(t, s, &q_final_flat);
+  let mut gamma_max_err = 0.0f64;
+  for tt in 0..t {
+    for sj in 0..s {
+      let err = (out.gamma()[(tt, sj)] - q_final[(tt, sj)]).abs();
+      if err > gamma_max_err {
+        gamma_max_err = err;
+      }
+    }
+  }
+  let (sp_final_flat, _) = read_npz_array::<f64>(&vbx_path, "sp_final");
+  let mut pi_max_err = 0.0f64;
+  for (sj, want) in sp_final_flat.iter().enumerate() {
+    let err = (out.pi()[sj] - want).abs();
+    if err > pi_max_err {
+      pi_max_err = err;
+    }
+  }
+  let (elbo_flat, _) = read_npz_array::<f64>(&vbx_path, "elbo_trajectory");
+  let elbo_max_err = out
+    .elbo_trajectory()
+    .iter()
+    .zip(elbo_flat.iter())
+    .map(|(g, w)| (g - w).abs())
+    .fold(0.0_f64, f64::max);
+  eprintln!(
+    "[parity_vbx_{fixture_dir}] T={t} S={s} stop={:?} iters={} gamma_max_err={gamma_max_err:.3e} pi_max_err={pi_max_err:.3e} elbo_max_err={elbo_max_err:.3e}",
+    out.stop_reason(),
+    out.elbo_trajectory().len(),
+  );
+  // Use the same tolerances as the canonical parity test on 01_dialogue.
+  assert!(gamma_max_err < 1.0e-12, "gamma_max_err={gamma_max_err}");
+  assert!(pi_max_err < 1.0e-9, "pi_max_err={pi_max_err}");
+  assert!(elbo_max_err < 1.0e-9, "elbo_max_err={elbo_max_err}");
+}
+
+#[test]
 fn vbx_iterate_matches_pyannote_q_final_pi_elbo() {
   crate::parity_fixtures_or_skip!();
   require_fixtures();

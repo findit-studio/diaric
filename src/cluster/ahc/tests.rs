@@ -152,12 +152,23 @@ fn single_row_returns_single_cluster() {
 /// - Row 2 ≈ (0, 1, 0)         → orthogonal
 ///
 /// Distances after L2 norm: d(0,1) ≈ 0.014, d(0,2) ≈ 1.414, d(1,2) ≈ 1.404.
-/// At threshold = 0.5: only the (0,1) pair merges → labels `[0, 0, 1]`.
+/// At threshold = 0.5: only the (0,1) pair merges. Asserts partition
+/// equivalence: rows 0 and 1 share a label, row 2 has a distinct
+/// label. Specific label *values* are determined by
+/// `np.unique`-style canonicalization (sort distinct DFS labels
+/// ascending) and depend on dendrogram traversal.
 #[test]
 fn merges_close_pair_separates_far_row() {
   let m = DMatrix::<f64>::from_row_slice(3, 3, &[1.0, 0.0, 0.0, 100.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
   let labels = ahc_init_dm(&m, 0.5, &crate::ops::spill::SpillOptions::default()).expect("ahc_init");
-  assert_eq!(labels, vec![0, 0, 1]);
+  assert_eq!(
+    labels[0], labels[1],
+    "rows 0 and 1 should share a cluster (got {labels:?})"
+  );
+  assert_ne!(
+    labels[0], labels[2],
+    "row 2 should be its own cluster (got {labels:?})"
+  );
 }
 
 /// All identical rows (after normalization) → single cluster regardless
@@ -183,15 +194,23 @@ fn tiny_threshold_keeps_every_row_isolated() {
   // Three orthogonal directions; pairwise distance after L2 norm ≈ √2 ≈ 1.414.
   let m = DMatrix::<f64>::from_row_slice(3, 3, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
   let labels = ahc_init_dm(&m, 0.1, &crate::ops::spill::SpillOptions::default()).expect("ahc_init");
-  // Encounter-order labels — each leaf is its own cluster, labelled in
-  // its first-encountered order.
-  assert_eq!(labels, vec![0, 1, 2]);
+  // Each leaf is its own cluster: 3 distinct labels, all from {0, 1, 2}.
+  let mut sorted = labels.clone();
+  sorted.sort_unstable();
+  sorted.dedup();
+  assert_eq!(
+    sorted,
+    vec![0, 1, 2],
+    "expected 3 distinct singleton clusters, got {labels:?}"
+  );
 }
 
-/// Labels must be encounter-order contiguous `0..k` (this is the
-/// `np.unique(return_inverse=True)` post-processing pyannote does).
+/// Labels must be contiguous `0..k` after `np.unique`-style
+/// canonicalization (sort distinct DFS labels ascending). The specific
+/// label values depend on the dendrogram traversal; only partition
+/// equivalence is asserted here.
 #[test]
-fn labels_are_encounter_order_contiguous() {
+fn labels_are_contiguous_after_canonicalization() {
   // Six rows: two pairs that should merge, plus two singletons that
   // shouldn't. Specific arrangement: pair A (rows 0, 3), pair B (rows
   // 1, 4), singleton (row 2), singleton (row 5).
@@ -208,11 +227,23 @@ fn labels_are_encounter_order_contiguous() {
     ],
   );
   let labels = ahc_init_dm(&m, 0.1, &crate::ops::spill::SpillOptions::default()).expect("ahc_init");
-  // Encounter order of labels: row 0 → 0, row 1 → 1, row 2 → 2,
-  // row 3 → 0 (same cluster as row 0), row 4 → 1, row 5 → 3.
-  assert_eq!(labels, vec![0, 1, 2, 0, 1, 3]);
-
-  // Sanity: labels are contiguous 0..k where k = number of distinct.
+  // Partition equivalence: rows 0 and 3 share a cluster, rows 1 and 4
+  // share, rows 2 and 5 are their own clusters.
+  assert_eq!(
+    labels[0], labels[3],
+    "rows 0,3 should share (got {labels:?})"
+  );
+  assert_eq!(
+    labels[1], labels[4],
+    "rows 1,4 should share (got {labels:?})"
+  );
+  assert_ne!(labels[0], labels[1]);
+  assert_ne!(labels[0], labels[2]);
+  assert_ne!(labels[0], labels[5]);
+  assert_ne!(labels[1], labels[2]);
+  assert_ne!(labels[1], labels[5]);
+  assert_ne!(labels[2], labels[5]);
+  // Labels are contiguous 0..k.
   let max = *labels.iter().max().unwrap();
   let mut seen = vec![false; max + 1];
   for &l in &labels {
@@ -277,11 +308,14 @@ fn centroid_linkage_inversion_matches_scipy() {
   //   step 1 (merge 2, {0,1}): d=0.574 ≤ 0.6 BUT subtree's max = 0.65 > 0.6
   //   step 2 (merge 3, ...): d=1.89 > 0.6
   // → no merges accepted; each leaf is its own cluster.
-  // Encounter-order labels: [0, 1, 2, 3].
+  // Each of the 4 leaves is its own cluster: 4 distinct labels.
+  let mut sorted = labels.clone();
+  sorted.sort_unstable();
+  sorted.dedup();
   assert_eq!(
-    labels,
+    sorted,
     vec![0, 1, 2, 3],
-    "inversion case must match scipy: subtree max > threshold means split"
+    "inversion case must match scipy: subtree max > threshold means split (got {labels:?})"
   );
 }
 

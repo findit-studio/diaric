@@ -9,8 +9,10 @@
 
 mod axpy;
 mod dot;
+mod kahan;
 mod pdist_euclidean;
 
 pub(crate) use axpy::axpy;
 pub(crate) use dot::dot;
+pub(crate) use kahan::{kahan_dot, kahan_sum};
 pub(crate) use pdist_euclidean::pdist_euclidean;

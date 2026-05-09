@@ -355,7 +355,16 @@ pub(crate) fn kmeans_lloyd(mat: &DMatrix<f64>, initial_centroids: Vec<Vec<f64>>)
   let mut assignments = vec![0usize; n];
   let mut prev = vec![usize::MAX; n];
 
-  for _iter in 0..100 {
+  for iter in 0..100 {
+    // Convergence check uses last iter's assignments. We rotate the two
+    // buffers (no per-iter clone) — at the start of iter > 0, swap so
+    // `prev` carries the last iter's values and `assignments` becomes the
+    // scratch buffer to overwrite this iter. Skip the swap on iter 0 so
+    // `prev` retains its `usize::MAX` sentinel; the first comparison can
+    // never converge (no real cluster id equals `MAX`).
+    if iter > 0 {
+      std::mem::swap(&mut assignments, &mut prev);
+    }
     // Assign each row to its nearest centroid (squared Euclidean).
     for j in 0..n {
       let mut best = 0usize;
@@ -379,9 +388,6 @@ pub(crate) fn kmeans_lloyd(mat: &DMatrix<f64>, initial_centroids: Vec<Vec<f64>>)
     if assignments == prev {
       break;
     }
-    // TODO(perf): swap with a temp buffer instead of cloning. O(N) clone
-    // per Lloyd iter is acceptable at v0.1.0 scale (N ≤ a few hundred).
-    prev = assignments.clone();
 
     // Recompute centroids as cluster means.
     let mut new_centroids = vec![vec![0.0f64; dim]; k];
@@ -523,6 +529,31 @@ mod eigen_tests {
     assert!((vals[0] - 1.0).abs() < 1e-10);
     assert!((vals[1] - 2.0).abs() < 1e-10);
     assert!((vals[2] - 3.0).abs() < 1e-10);
+  }
+
+  #[test]
+  fn eigendecompose_rejects_non_finite_eigenvalues() {
+    // NaN in a symmetric input propagates through nalgebra's
+    // SymmetricEigen and emerges as NaN eigenvalues. The is_finite
+    // guard at spectral.rs:183 must surface this as
+    // Error::EigendecompositionFailed rather than passing NaN
+    // eigenvalues + eigenvectors downstream into pick_k / k-means
+    // (where NaN comparisons silently corrupt sort/argmax).
+    //
+    // The upstream `normalized_laplacian` constructs L_sym from
+    // finite affinities, so this path is currently unreachable from
+    // public callers. The guard exists as defense-in-depth in case a
+    // future caller bypasses the boundary checks; the test pins the
+    // contract so a refactor that drops the guard fails CI.
+    let mut m = DMatrix::<f64>::zeros(3, 3);
+    m[(0, 0)] = f64::NAN;
+    m[(1, 1)] = 1.0;
+    m[(2, 2)] = 2.0;
+    let r = eigendecompose(m);
+    assert!(
+      matches!(r, Err(Error::EigendecompositionFailed)),
+      "expected Err(EigendecompositionFailed) for NaN-containing input, got {r:?}"
+    );
   }
 
   #[test]

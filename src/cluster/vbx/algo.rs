@@ -325,20 +325,31 @@ pub fn vbx_iterate(
     let row_sq = crate::ops::dot(row, row);
     g[r] = -0.5 * (row_sq + d as f64 * log_2pi);
   }
-  // V = sqrt(Phi); rho[t,d] = X[t,d] * V[d]. Column-major DMatrix
-  // because the downstream `gamma.T @ rho` matmul (matrixmultiply
-  // crate via nalgebra) exploits the column-major layout for its
-  // cache-blocked GEMM. Hand-rolled dot-based and axpy-outer-product
-  // matmul replacements in `ops::*` regressed the dominant
-  // 01_dialogue fixture at the pipeline level: at our (T~200, S~10,
-  // D=128) shape, matrixmultiply's blocked microkernel beats both
-  // approaches. A proper hand-rolled cache-blocked GEMM is out of
-  // scope here.
+  // V = sqrt(Phi); rho[t,d] = X[t,d] * V[d]. Build both layouts up
+  // front: `rho` stays column-major (T rows × D cols) so existing
+  // index-based reads still work, and `rho_row_major` packs the
+  // same values row-major for the Kahan-summed GEMMs below. The
+  // O(T·D) extra storage is small (≤ 1024 × 128 × 8 B ≈ 1 MB at
+  // production scale) and amortizes across all `max_iters` EM
+  // iterations — the row-major buffer is read T·S + T·D times per
+  // pass, so the one-shot pack pays for itself immediately.
+  //
+  // Why both layouts: Kahan/Neumaier-summed dot needs contiguous
+  // `&[f64]` slices for both operands. The first GEMM
+  // (`gamma.T @ rho`) reads `gamma`'s column (column-major
+  // contiguous) against `rho`'s column (column-major contiguous),
+  // and the second (`rho @ alpha.T`) reads `rho`'s row (needs
+  // row-major) against `alpha`'s row (also row-major, packed
+  // separately each iter). Packing once here keeps both inner
+  // loops as pure dot products.
   let v_sqrt: DVector<f64> = phi.map(|p| p.sqrt());
   let mut rho = DMatrix::<f64>::zeros(t, d);
+  let mut rho_row_major: Vec<f64> = Vec::with_capacity(t * d);
   for r in 0..t {
     for c in 0..d {
-      rho[(r, c)] = x_row_major[r * d + c] * v_sqrt[c];
+      let val = x_row_major[r * d + c] * v_sqrt[c];
+      rho[(r, c)] = val;
+      rho_row_major.push(val);
     }
   }
 
@@ -352,11 +363,29 @@ pub fn vbx_iterate(
   let fa_over_fb = fa / fb;
   let mut converged = false;
 
+  // Row-major scratch for `alpha` reused across EM iterations. The
+  // second GEMM (`rho @ alpha.T`) reads `alpha`'s rows; packing once
+  // per iter keeps the kahan_dot inner loop on contiguous slices.
+  let mut alpha_row_major: Vec<f64> = vec![0.0; s * d];
+
   for ii in 0..max_iters {
     // ── E-step (speaker-model update) ────────────────────────────
     // gamma_sum, invL, alpha
+    //
     // gamma_sum[s] = column-sum of gamma over T rows (Eq. 17 input).
-    let gamma_sum = DVector::<f64>::from_vec((0..s).map(|j| gamma.column(j).sum()).collect());
+    // Use Neumaier-compensated summation: T can reach ~1000 chunks
+    // for long recordings, and plain reduction order (matrixmultiply
+    // cache-blocked vs numpy/BLAS) accumulates enough drift over 20
+    // EM iters to flip a `pi[s] > SP_ALIVE_THRESHOLD = 1e-7` decision
+    // — the failure mode tagged in the audit as "GEMM roundoff drift
+    // on long recordings" (pipeline I-P1). gamma columns are
+    // contiguous in column-major DMatrix storage.
+    let gamma_storage = gamma.as_slice();
+    let gamma_sum = DVector::<f64>::from_vec(
+      (0..s)
+        .map(|j| crate::ops::kahan_sum(&gamma_storage[j * t..(j + 1) * t]))
+        .collect(),
+    );
 
     // invL[s,d] = 1 / (1 + Fa/Fb * gamma_sum[s] * Phi[d])  (Eq. 17)
     let mut inv_l = DMatrix::<f64>::zeros(s, d);
@@ -368,17 +397,44 @@ pub fn vbx_iterate(
     }
 
     // alpha[s,d] = Fa/Fb * invL[s,d] * (gamma.T @ rho)[s,d]  (Eq. 16)
-    let prod = gamma.transpose() * &rho; // (S, D)
+    //
+    // The (S, T) × (T, D) product is the dominant GEMM. Both `gamma`
+    // and `rho` are column-major DMatrix, so `column(c).as_slice()`
+    // is the c-th contiguous column; pull the raw storage directly
+    // to avoid re-validating bounds inside the hot inner loop. Each
+    // output[s, d] reduces T values via Neumaier summation,
+    // restoring order-independence so EM trajectories converge to
+    // the same fixed point regardless of BLAS reduction order.
+    let rho_storage = rho.as_slice();
     let mut alpha = DMatrix::<f64>::zeros(s, d);
     for sj in 0..s {
+      let gamma_col_sj = &gamma_storage[sj * t..(sj + 1) * t];
       for dk in 0..d {
-        alpha[(sj, dk)] = fa_over_fb * inv_l[(sj, dk)] * prod[(sj, dk)];
+        let rho_col_dk = &rho_storage[dk * t..(dk + 1) * t];
+        let prod_sd = crate::ops::kahan_dot(gamma_col_sj, rho_col_dk);
+        let alpha_sd = fa_over_fb * inv_l[(sj, dk)] * prod_sd;
+        alpha[(sj, dk)] = alpha_sd;
+        // Pack alpha row-major in the same pass for the next GEMM.
+        alpha_row_major[sj * d + dk] = alpha_sd;
       }
     }
 
     // ── log_p_ (per-(frame, speaker) log-likelihood, Eq. 23) ─────
     // log_p_[t,s] = Fa * (rho @ alpha.T - 0.5*(invL+alpha**2)@Phi + G) (Eq. 23)
-    let rho_alpha_t = &rho * alpha.transpose(); // (T, S)
+    //
+    // Second GEMM (T, D) × (D, S): reduces D=128 values per output.
+    // Smaller drift than the first GEMM but still in the EM loop —
+    // covered by the same Neumaier summation for full
+    // order-independence. `rho_row_major` and `alpha_row_major` are
+    // pre-packed contiguous so kahan_dot reads slices directly.
+    let mut rho_alpha_t = DMatrix::<f64>::zeros(t, s);
+    for tt in 0..t {
+      let rho_row_tt = &rho_row_major[tt * d..(tt + 1) * d];
+      for sj in 0..s {
+        let alpha_row_sj = &alpha_row_major[sj * d..(sj + 1) * d];
+        rho_alpha_t[(tt, sj)] = crate::ops::kahan_dot(rho_row_tt, alpha_row_sj);
+      }
+    }
     // (invL + alpha**2) @ Phi : (S, D) · (D,) → (S,).
     //
     // Pack `(invL[s,:] + α[s,:]²)` into a contiguous scratch buffer
