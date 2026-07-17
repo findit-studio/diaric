@@ -34,7 +34,7 @@ pub fn axpy(y: &mut [f64], alpha: f64, x: &[f64]) {
 /// emits NEON `vfmaq_f32` / AVX2 `_mm256_fmadd_ps` for this loop in
 /// release mode (verified on 1.95 nightly with `cargo asm`). We keep
 /// it as a named primitive so callers route through the SIMD-aware
-/// [`crate::ops::axpy_f32`] dispatcher; arch-specific overrides can
+/// `axpy_f32` dispatcher; arch-specific overrides can
 /// be added later without touching call sites.
 #[inline]
 #[allow(dead_code)]

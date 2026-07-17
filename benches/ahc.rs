@@ -1,6 +1,6 @@
 //! AHC initialization throughput baseline.
 //!
-//! Times `diarization::cluster::ahc::ahc_init` (L2-normalize → centroid linkage
+//! Times `diaric::cluster::ahc::ahc_init` (L2-normalize → centroid linkage
 //! → fcluster + remap) on each captured fixture's training-embedding
 //! subset.
 //!
@@ -20,7 +20,7 @@
 use std::{fs::File, hint::black_box, io::BufReader, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use diarization::{cluster::ahc::ahc_init, ops::spill::SpillOptions};
+use diaric::{cluster::ahc::ahc_init, ops::spill::SpillOptions};
 use npyz::npz::NpzArchive;
 
 const FIXTURES: &[&str] = &[

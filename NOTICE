@@ -1,8 +1,16 @@
-dia
-Copyright the dia authors
+diaric — inherited third-party attribution NOTICE
+Copyright the dia / diaric authors
 
 This product is dual-licensed under MIT OR Apache-2.0 (caller's choice).
 See LICENSE-MIT and LICENSE-APACHE for those terms.
+
+NOTE: This NOTICE is carried verbatim from the upstream `diarization`
+crate. The `pyannote/segmentation-3.0` (bundled ONNX) and WeSpeaker
+embedding sections below describe models that `diarization` bundles or
+loads — `diaric` ships NO ONNX/Torch model files. The only third-party
+artifact `diaric` embeds is the CC-BY-4.0 PLDA weight set (section 2). See
+the LICENSE-MAPPING section of README.md for the per-component mapping that
+applies to `diaric`.
 
 ────────────────────────────────────────────────────────────────────────
 

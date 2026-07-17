@@ -19,8 +19,8 @@
 //!
 //! Stage 8 (per-frame discrete diarization) is handled by
 //! [`crate::reconstruct`]. Callers usually reach this pipeline
-//! transitively via [`crate::offline::diarize_offline`] or
-//! [`crate::streaming::StreamingOfflineDiarizer`].
+//! transitively via [`crate::offline::diarize_offline`] or the
+//! `StreamingOfflineDiarizer` in the `diarization` crate.
 
 mod algo;
 pub mod error;

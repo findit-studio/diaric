@@ -56,24 +56,22 @@ pub fn axpy(y: &mut [f64], alpha: f64, x: &[f64]) {
 
 /// f32 AXPY: `y[i] += alpha * x[i]`.
 ///
-/// Used by [`crate::embed::embedder`] to accumulate per-window
-/// WeSpeaker embeddings into a 256-d aggregator. No arch-specific
-/// kernel yet — the scalar `f32::mul_add` loop autovectorizes to
-/// `vfmaq_f32` (NEON) / `_mm256_fmadd_ps` (AVX2 + FMA) with
-/// `--release`. Plug in explicit SIMD kernels later without touching
-/// call sites.
+/// Used by the WeSpeaker embedder (which lives in the `diarization`
+/// crate) to accumulate per-window embeddings into a 256-d aggregator.
+/// No arch-specific kernel yet — the scalar `f32::mul_add` loop
+/// autovectorizes to `vfmaq_f32` (NEON) / `_mm256_fmadd_ps` (AVX2 +
+/// FMA) with `--release`. Plug in explicit SIMD kernels later without
+/// touching call sites.
 ///
 /// # Panics
 ///
 /// If `y.len() != x.len()`.
 #[inline]
-// `axpy_f32`'s only callers (in `crate::embed::embedder`) are gated
-// behind `any(feature = "ort", feature = "tch")`. Under
-// `--no-default-features` the function is unused but must stay
-// reachable so SDE / miri jobs that build without either backend can
-// still verify the SIMD-policy doesn't regress. `RUSTFLAGS=-Dwarnings`
-// would otherwise turn the dead-code warning into a hard error and
-// skip backend coverage entirely.
+// `axpy_f32` has no caller in `diaric` itself (its consumer, the
+// embedding aggregator, is in the `diarization` crate). It is kept as a
+// primitive so the SIMD dispatch policy stays in one place;
+// `#[allow(dead_code)]` prevents the unused-fn warning from becoming a
+// hard error under `RUSTFLAGS=-Dwarnings`.
 #[allow(dead_code)]
 pub fn axpy_f32(y: &mut [f32], alpha: f32, x: &[f32]) {
   assert_eq!(

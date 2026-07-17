@@ -1,19 +1,16 @@
 //! Error type for `diarization::embed`.
 
-#[cfg(feature = "ort")]
-use std::path::PathBuf;
-
 use thiserror::Error;
 
 /// Errors returned by `diarization::embed` APIs.
 ///
 /// Marked `#[non_exhaustive]` so callers must include a `_ =>` arm in
 /// any `match`. Variants in this enum represent low-level numerical /
-/// boundary conditions (NaN/inf inputs, shape drift, ORT failure, …)
-/// and the set evolves as new failure modes are surfaced or as
-/// internal kernels stop being able to produce a given variant. The
-/// attribute lets us add or retire variants without it being a
-/// semver-breaking change for downstream exhaustive matchers.
+/// boundary conditions (NaN/inf inputs, shape drift, …) and the set
+/// evolves as new failure modes are surfaced or as internal kernels
+/// stop being able to produce a given variant. The attribute lets us
+/// add or retire variants without it being a semver-breaking change for
+/// downstream exhaustive matchers.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -63,7 +60,7 @@ pub enum Error {
   AllSilent,
 
   /// `frame_mask` passed to `EmbedModel::embed_chunk_with_frame_mask`
-  /// is empty or has no active frames. Both backends would feed
+  /// is empty or has no active frames. The embedding backend would feed
   /// all-zero pooling weights into statistics pooling and produce
   /// NaN from the division — surface it as a typed boundary error
   /// instead of letting NaN flow into PLDA/clustering.
@@ -73,8 +70,8 @@ pub enum Error {
   /// `chunk_samples.len()` passed to
   /// `EmbedModel::embed_chunk_with_frame_mask` doesn't match the
   /// pyannote-style 10s chunk size (`segment::WINDOW_SAMPLES`).
-  /// The ORT/tch backends compute fbank from the whole chunk and
-  /// feed it to a pooling layer expecting fixed geometry; a non-
+  /// The embedding backend computes fbank from the whole chunk and
+  /// feeds it to a pooling layer expecting fixed geometry; a non-
   /// pyannote-sized chunk produces a finite-but-wrong embedding
   /// that silently corrupts downstream PLDA/clustering.
   #[error(
@@ -90,10 +87,10 @@ pub enum Error {
   /// `frame_mask.len()` passed to
   /// `EmbedModel::embed_chunk_with_frame_mask` doesn't match the
   /// pyannote-style 589-frame segmentation grid
-  /// (`segment::FRAMES_PER_WINDOW`). The backends pass `frame_mask`
-  /// directly as the pooling-layer weights dimension; an off-by-one
-  /// or sample-level mask changes the integration window and produces
-  /// a finite-but-wrong embedding.
+  /// (`segment::FRAMES_PER_WINDOW`). The embedding backend passes
+  /// `frame_mask` directly as the pooling-layer weights dimension; an
+  /// off-by-one or sample-level mask changes the integration window and
+  /// produces a finite-but-wrong embedding.
   #[error(
     "frame_mask.len() = {got}, expected {expected} (pyannote segmentation = FRAMES_PER_WINDOW)"
   )]
@@ -114,7 +111,7 @@ pub enum Error {
   #[error("input contains a zero-norm or degenerate embedding")]
   DegenerateEmbedding,
 
-  /// ONNX inference output had an unexpected element count.
+  /// Inference output had an unexpected element count.
   #[error("inference scores length {got}, expected {expected}")]
   InferenceShapeMismatch {
     /// Element count the contract expects (`n * EMBEDDING_DIM`).
@@ -123,90 +120,14 @@ pub enum Error {
     got: usize,
   },
 
-  /// ONNX `session.run()` returned a zero-output `SessionOutputs`.
-  /// Realistic causes are a malformed model export (no graph outputs)
-  /// or ABI drift in `ort` itself. Without this typed error,
-  /// `outputs[0]` would panic at the FFI boundary instead of
-  /// surfacing as a recoverable error to library callers.
-  #[cfg(feature = "ort")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "ort")))]
-  #[error("inference returned no outputs (malformed model graph or ORT ABI drift)")]
-  MissingInferenceOutput,
-
-  /// ONNX inference output contained a NaN/`±inf` value. Realistic
-  /// upstream causes are degraded ONNX providers, model corruption,
-  /// or non-finite input that flows through ResNet without saturation.
+  /// Inference output contained a NaN/`±inf` value. Realistic upstream
+  /// causes are degraded inference providers, model corruption, or
+  /// non-finite input that flows through ResNet without saturation.
   /// Owned/streaming offline diarization paths previously treated
   /// non-finite-norm embeddings as "inactive speaker" silently —
   /// this variant lets them surface the corruption instead.
   #[error("inference output contains non-finite values (NaN / +inf / -inf)")]
   NonFiniteOutput,
-
-  /// ONNX inference output had an unexpected tensor shape (rank or per-axis size),
-  /// even when the total element count would otherwise have matched. Catches
-  /// silently corrupting layout drift like `[EMBEDDING_DIM, n]` or
-  /// `[1, n * EMBEDDING_DIM]` from a custom/exporter-drifted model.
-  #[cfg(feature = "ort")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "ort")))]
-  #[error("inference output shape {got:?}, expected [{n}, {embedding_dim}]")]
-  InferenceOutputShape {
-    /// Actual shape from the ORT tensor.
-    got: Vec<i64>,
-    /// Batch dimension (clip count) the dispatcher passed in.
-    n: usize,
-    /// Per-row width the model is contracted to emit.
-    embedding_dim: usize,
-  },
-
-  /// Load-time model shape verification failed.
-  #[cfg(feature = "ort")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "ort")))]
-  #[error("model {tensor} dims {got:?}, expected {expected:?}")]
-  IncompatibleModel {
-    /// Name of the tensor whose shape is wrong (e.g. `"input"` /
-    /// `"output"`).
-    tensor: &'static str,
-    /// Shape the dia contract expects.
-    expected: &'static [i64],
-    /// Shape the loaded ONNX file actually declares.
-    got: Vec<i64>,
-  },
-
-  /// Failed to load the ONNX model from disk.
-  #[cfg(feature = "ort")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "ort")))]
-  #[error("failed to load model from {path}: {source}", path = path.display())]
-  LoadModel {
-    /// Path to the ONNX file the loader attempted.
-    path: PathBuf,
-    /// Underlying error from `ort`.
-    #[source]
-    source: ort::Error,
-  },
-
-  /// Wrap an `ort::Error` from session/inference.
-  #[cfg(feature = "ort")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "ort")))]
-  #[error(transparent)]
-  Ort(#[from] ort::Error),
-
-  /// Failed to load a TorchScript module from disk.
-  #[cfg(feature = "tch")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "tch")))]
-  #[error("failed to load TorchScript model from {path}: {source}", path = path.display())]
-  LoadTorchScript {
-    /// Path to the TorchScript module the loader attempted.
-    path: std::path::PathBuf,
-    /// Underlying error from `tch`.
-    #[source]
-    source: tch::TchError,
-  },
-
-  /// Wrap a `tch::TchError` from inference.
-  #[cfg(feature = "tch")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "tch")))]
-  #[error(transparent)]
-  Tch(#[from] tch::TchError),
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! Weighted-centroid throughput baseline.
 //!
-//! Times `diarization::cluster::centroid::weighted_centroids` — the post-VBx
+//! Times `diaric::cluster::centroid::weighted_centroids` — the post-VBx
 //! `W = q[:, sp > threshold]; centroids = W.T @ raw / W.sum(0).T`
 //! AXPY accumulator. The dominant cost is the inner
 //! `centroids[k, d] += w * embed[t, d]` loop, sized `K_alive · T · D`.
@@ -18,7 +18,7 @@
 use std::{fs::File, hint::black_box, io::BufReader, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use diarization::cluster::centroid::{SP_ALIVE_THRESHOLD, weighted_centroids};
+use diaric::cluster::centroid::{SP_ALIVE_THRESHOLD, weighted_centroids};
 use nalgebra::{DMatrix, DVector};
 use npyz::npz::NpzArchive;
 

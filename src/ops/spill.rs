@@ -21,7 +21,7 @@
 //! Convert with [`SpillBytesMut::freeze`]:
 //!
 //! ```ignore
-//! use diarization::ops::spill::{SpillBytesMut, SpillOptions};
+//! use diaric::ops::spill::{SpillBytesMut, SpillOptions};
 //! let opts = SpillOptions::default();
 //! let mut buf: SpillBytesMut<f64> = SpillBytesMut::zeros(1024, &opts).unwrap();
 //! for (i, slot) in buf.as_mut_slice().iter_mut().enumerate() {

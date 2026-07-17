@@ -29,18 +29,6 @@ pub enum Error {
   /// Propagated from [`crate::plda::PldaTransform`].
   #[error("offline: plda: {0}")]
   Plda(#[from] crate::plda::Error),
-  /// Propagated from segmentation ONNX inference inside the
-  /// `OwnedDiarizationPipeline` audio entrypoint.
-  #[cfg(feature = "ort")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "ort")))]
-  #[error("offline: segment: {0}")]
-  Segment(#[from] crate::segment::Error),
-  /// Propagated from embedding ONNX inference inside the
-  /// `OwnedDiarizationPipeline` audio entrypoint.
-  #[cfg(feature = "ort")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "ort")))]
-  #[error("offline: embed: {0}")]
-  Embed(#[from] crate::embed::Error),
   /// Propagated from `aggregate::try_count_pyannote` when the count
   /// tensor cannot be computed (e.g. invalid `onset` configuration).
   /// This replaces a panic path through the infallible

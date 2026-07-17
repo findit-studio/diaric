@@ -11,7 +11,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use diarization::ops;
+use diaric::ops;
 use rand::{SeedableRng, prelude::*};
 use rand_chacha::ChaCha20Rng;
 

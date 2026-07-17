@@ -41,8 +41,8 @@
 //!   sums ([`crate::cluster::centroid::weighted_centroids`]): SIMD via
 //!   [`dot`]/[`axpy`]. These stages are continuous/iterative; ulp
 //!   drift smooths instead of flipping discrete decisions.
-//! - **Embed aggregation** ([`crate::embed::embedder`]): SIMD via
-//!   [`axpy_f32`]. Continuous f32 sum.
+//! - **Embed aggregation** (the WeSpeaker embedder in the `diarization`
+//!   crate): SIMD via `axpy_f32`. Continuous f32 sum.
 //!
 //! ## Cross-architecture determinism
 //!
@@ -61,8 +61,6 @@ mod dispatch;
 pub mod scalar;
 pub mod spill;
 
-#[cfg(any(feature = "ort", feature = "tch"))]
-pub use dispatch::axpy_f32;
 #[cfg(feature = "_bench")]
 pub use dispatch::pdist_euclidean;
 pub use dispatch::{axpy, dot, kahan_dot, kahan_sum, logsumexp_row};

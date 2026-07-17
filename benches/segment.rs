@@ -2,9 +2,7 @@
 //! measure state-machine cost only (no ort).
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use diarization::segment::{
-  Action, FRAMES_PER_WINDOW, POWERSET_CLASSES, SegmentOptions, Segmenter,
-};
+use diaric::segment::{Action, FRAMES_PER_WINDOW, POWERSET_CLASSES, SegmentOptions, Segmenter};
 
 fn synth_scores() -> Vec<f32> {
   let mut out = vec![-10.0f32; FRAMES_PER_WINDOW * POWERSET_CLASSES];

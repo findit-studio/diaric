@@ -916,9 +916,9 @@ pub fn compute_fbank(samples: &[f32]) -> Result<Box<[[f32; FBANK_NUM_MELS]; FBAN
 /// returning a flat row-major `(num_frames, FBANK_NUM_MELS)` Vec.
 ///
 /// Same kaldi parameters as [`compute_fbank`], same int16 scaling,
-/// same per-mel mean centering across frames. Used by the ORT
-/// backend for the 10 s chunk + frame-mask path
-/// ([`crate::embed::EmbedModel::embed_chunk_with_frame_mask`]) where
+/// same per-mel mean centering across frames. Used by the embedding
+/// model runner in the `diarization` crate for the 10 s chunk +
+/// frame-mask path (`EmbedModel::embed_chunk_with_frame_mask`) where
 /// the frame count varies with the input length and the fixed-size
 /// [`compute_fbank`] return type doesn't fit.
 pub fn compute_full_fbank(samples: &[f32]) -> Result<Vec<f32>, Error> {

@@ -1,6 +1,6 @@
 //! VBx EM-iteration throughput baseline.
 //!
-//! Times `diarization::cluster::vbx::vbx_iterate` end-to-end on each captured
+//! Times `diaric::cluster::vbx::vbx_iterate` end-to-end on each captured
 //! fixture, holding the inputs constant across iterations. The
 //! per-iteration time covers all `max_iters = 20` EM rounds plus the
 //! pre-loop matrix setup.
@@ -18,7 +18,7 @@
 use std::{fs::File, hint::black_box, io::BufReader, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use diarization::cluster::vbx::vbx_iterate;
+use diaric::cluster::vbx::vbx_iterate;
 use nalgebra::{DMatrix, DVector};
 use npyz::npz::NpzArchive;
 

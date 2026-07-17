@@ -1,6 +1,6 @@
 //! End-to-end `assign_embeddings` throughput baseline.
 //!
-//! Times `diarization::pipeline::assign_embeddings` — the full
+//! Times `diaric::pipeline::assign_embeddings` — the full
 //! pyannote `cluster_vbx` flow stages 2-7 (AHC + VBx + centroid +
 //! cosine + Hungarian). This is the integration-level measurement;
 //! the per-stage benches isolate individual primitives.
@@ -14,7 +14,7 @@
 use std::{fs::File, hint::black_box, io::BufReader, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use diarization::pipeline::{AssignEmbeddingsInput, assign_embeddings};
+use diaric::pipeline::{AssignEmbeddingsInput, assign_embeddings};
 use nalgebra::DVector;
 use npyz::npz::NpzArchive;
 

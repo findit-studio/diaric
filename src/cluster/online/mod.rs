@@ -31,8 +31,8 @@
 //! newly created one, or a drop.
 //!
 //! ```
-//! use diarization::cluster::online::{OnlineClusterer, OnlineClusterOptions, Assignment};
-//! use diarization::embed::{EMBEDDING_DIM, Embedding};
+//! use diaric::cluster::online::{OnlineClusterer, OnlineClusterOptions, Assignment};
+//! use diaric::embed::{EMBEDDING_DIM, Embedding};
 //!
 //! let mut basis = [0.0f32; EMBEDDING_DIM];
 //! basis[0] = 1.0;
