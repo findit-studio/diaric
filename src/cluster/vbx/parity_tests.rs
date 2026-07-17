@@ -1,4 +1,4 @@
-//! Parity tests for `diarization::cluster::vbx` against the captured artifacts.
+//! Parity tests for `crate::cluster::vbx` against the captured artifacts.
 //!
 //! Loads `tests/parity/fixtures/01_dialogue/{plda_embeddings, vbx_state}.npz`
 //! and asserts that `vbx_iterate(post_plda, phi, qinit, fa, fb, max_iters)`

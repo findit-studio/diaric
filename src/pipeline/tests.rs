@@ -1,4 +1,4 @@
-//! Model-free unit tests for `diarization::pipeline`.
+//! Model-free unit tests for `crate::pipeline`.
 
 use crate::pipeline::{AssignEmbeddingsInput, assign_embeddings};
 use nalgebra::DVector;

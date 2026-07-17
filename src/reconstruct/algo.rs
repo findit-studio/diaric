@@ -177,7 +177,7 @@ impl<'a> ReconstructInput<'a> {
   /// - `segmentations`: per-`(chunk, frame, speaker)` activity flattened
   ///   `[c][f][s]`. Length `num_chunks * num_frames_per_chunk * num_speakers`.
   /// - `hard_clusters`: per-chunk hard cluster assignment (output of
-  ///   `diarization::pipeline`). Length `num_chunks`; each inner vec has
+  ///   `crate::pipeline`). Length `num_chunks`; each inner vec has
   ///   length `num_speakers` with `-2` indicating an unmatched speaker.
   /// - `count`: per-output-frame instantaneous speaker count.
   ///   Length `num_output_frames`.
@@ -500,7 +500,7 @@ pub fn reconstruct(
   // upstream model corruption (torch nan-prop), and a silent fallback
   // here lets a degraded inference dependency produce plausible-but-
   // wrong RTTM output. Surfacing it as a clear typed error matches
-  // `diarization::cluster::hungarian`'s ±inf rejection at the solver boundary.
+  // `crate::cluster::hungarian`'s ±inf rejection at the solver boundary.
   for &v in segmentations {
     if !v.is_finite() {
       return Err(NonFiniteField::Segmentations.into());

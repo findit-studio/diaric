@@ -1,4 +1,4 @@
-//! Error variants for `diarization::cluster::vbx`.
+//! Error variants for `crate::cluster::vbx`.
 
 use thiserror::Error;
 

@@ -1,4 +1,4 @@
-//! Errors for `diarization::pipeline`.
+//! Errors for `crate::pipeline`.
 
 use thiserror::Error;
 
@@ -14,19 +14,19 @@ pub enum Error {
   /// `min_active_ratio` falls outside `(0.0, 1.0]`.
   #[error("pipeline: invalid min_active_ratio (must be in (0, 1]): {0}")]
   InvalidActiveRatio(f64),
-  /// Propagated from `diarization::cluster::ahc`.
+  /// Propagated from `crate::cluster::ahc`.
   #[error("pipeline: ahc: {0}")]
   Ahc(#[from] crate::cluster::ahc::Error),
-  /// Propagated from `diarization::cluster::vbx`.
+  /// Propagated from `crate::cluster::vbx`.
   #[error("pipeline: vbx: {0}")]
   Vbx(#[from] crate::cluster::vbx::Error),
-  /// Propagated from `diarization::cluster::centroid`.
+  /// Propagated from `crate::cluster::centroid`.
   #[error("pipeline: centroid: {0}")]
   Centroid(#[from] crate::cluster::centroid::Error),
-  /// Propagated from `diarization::cluster::hungarian`.
+  /// Propagated from `crate::cluster::hungarian`.
   #[error("pipeline: hungarian: {0}")]
   Hungarian(#[from] crate::cluster::hungarian::Error),
-  /// Propagated from `diarization::plda`.
+  /// Propagated from `crate::plda`.
   #[error("pipeline: plda: {0}")]
   Plda(#[from] crate::plda::Error),
   /// Propagated from `crate::ops::spill::SpillBytesMut::zeros` when

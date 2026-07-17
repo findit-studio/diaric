@@ -5,12 +5,12 @@
 //! (`clustering.py:570-625` in pyannote.audio 4.0.4):
 //!
 //! 1. Filter active embeddings (currently caller-supplied).
-//! 2. AHC initialization on the active subset (`diarization::cluster::ahc`).
-//! 3. PLDA project (`diarization::plda::PldaTransform::project` — currently caller-supplied).
-//! 4. VBx EM iterations (`diarization::cluster::vbx::vbx_iterate`).
-//! 5. Drop sp-squashed clusters and compute weighted centroids (`diarization::cluster::centroid`).
+//! 2. AHC initialization on the active subset (`crate::cluster::ahc`).
+//! 3. PLDA project (`crate::plda::PldaTransform::project` — currently caller-supplied).
+//! 4. VBx EM iterations (`crate::cluster::vbx::vbx_iterate`).
+//! 5. Drop sp-squashed clusters and compute weighted centroids (`crate::cluster::centroid`).
 //! 6. Per-chunk per-speaker centroid distances (cdist with cosine metric).
-//! 7. `constrained_argmax` over masked soft clusters (`diarization::cluster::hungarian`).
+//! 7. `constrained_argmax` over masked soft clusters (`crate::cluster::hungarian`).
 //!
 //! Output: per-chunk hard-cluster assignments `Arc<[ChunkAssignment]>`,
 //! where each [`ChunkAssignment`] is `[i32; MAX_SPEAKER_SLOTS]` (= 3)

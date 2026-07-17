@@ -1,4 +1,4 @@
-//! Errors for `diarization::reconstruct`.
+//! Errors for `crate::reconstruct`.
 
 use thiserror::Error;
 

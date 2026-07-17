@@ -74,7 +74,7 @@ pub(crate) const RAW_EMBEDDING_MIN_NORM: f64 = 0.01;
 /// Raw, **unnormalized** WeSpeaker output destined for the PLDA
 /// transform. Wrapping the `[f32; 256]` in a distinct type prevents
 /// the most likely API misuse: feeding
-/// [`diarization::embed::Embedding::as_array`](crate::embed::Embedding::as_array),
+/// [`crate::embed::Embedding::as_array`](crate::embed::Embedding::as_array),
 /// which is L2-normalized.
 ///
 /// Pyannote's `xvec_tf` operates on **raw** WeSpeaker outputs
@@ -393,7 +393,7 @@ impl PldaTransform {
   /// not re-normalize this output.
   ///
   /// `input` is a [`RawEmbedding`] — a raw, **unnormalized** WeSpeaker
-  /// vector — not [`diarization::embed::Embedding`](crate::embed::Embedding)
+  /// vector — not [`crate::embed::Embedding`](crate::embed::Embedding)
   /// (L2-normalized) which is the wrong distribution for PLDA.
   ///
   /// # Errors

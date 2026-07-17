@@ -1,4 +1,4 @@
-//! Errors for `diarization::cluster::hungarian`.
+//! Errors for `crate::cluster::hungarian`.
 
 use thiserror::Error;
 

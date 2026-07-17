@@ -1,4 +1,4 @@
-//! Errors for `diarization::cluster::centroid`.
+//! Errors for `crate::cluster::centroid`.
 
 use thiserror::Error;
 

@@ -1,4 +1,4 @@
-//! Shared test helpers for `diarization::cluster` test modules.
+//! Shared test helpers for `crate::cluster` test modules.
 //!
 //! Test-only (not visible in non-`cfg(test)` builds).
 

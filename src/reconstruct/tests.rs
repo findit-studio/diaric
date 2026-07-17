@@ -1,4 +1,4 @@
-//! Model-free unit tests for `diarization::reconstruct`.
+//! Model-free unit tests for `crate::reconstruct`.
 
 use crate::{
   cluster::hungarian::UNMATCHED,

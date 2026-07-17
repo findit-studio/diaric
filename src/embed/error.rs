@@ -1,8 +1,8 @@
-//! Error type for `diarization::embed`.
+//! Error type for `crate::embed`.
 
 use thiserror::Error;
 
-/// Errors returned by `diarization::embed` APIs.
+/// Errors returned by `crate::embed` APIs.
 ///
 /// Marked `#[non_exhaustive]` so callers must include a `_ =>` arm in
 /// any `match`. Variants in this enum represent low-level numerical /

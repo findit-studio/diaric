@@ -1,4 +1,4 @@
-//! Configuration constants and tunables for `diarization::segment`.
+//! Configuration constants and tunables for `crate::segment`.
 
 use core::{num::NonZeroU32, time::Duration};
 

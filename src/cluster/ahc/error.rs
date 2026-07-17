@@ -1,4 +1,4 @@
-//! Errors for `diarization::cluster::ahc`.
+//! Errors for `crate::cluster::ahc`.
 
 use thiserror::Error;
 

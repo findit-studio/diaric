@@ -1,4 +1,4 @@
-//! End-to-end parity test: `diarization::pipeline::assign_embeddings` against
+//! End-to-end parity test: `crate::pipeline::assign_embeddings` against
 //! pyannote's captured `clustering.npz['hard_clusters']`.
 //!
 //! Inputs (all from the captured fixtures):

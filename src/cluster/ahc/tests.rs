@@ -1,4 +1,4 @@
-//! Model-free unit tests for `diarization::cluster::ahc`.
+//! Model-free unit tests for `crate::cluster::ahc`.
 //!
 //! Heavy parity against pyannote's captured `ahc_init_labels.npy` lives
 //! in `src/ahc/parity_tests.rs`. This module covers smaller invariants

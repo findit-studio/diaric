@@ -1,4 +1,4 @@
-//! Hermetic, model-free tests for `diarization::cluster::online`.
+//! Hermetic, model-free tests for `crate::cluster::online`.
 //!
 //! Every cosine distance and every centroid value asserted below is
 //! hand-computed from exactly-representable inputs (one-hot / small-fraction

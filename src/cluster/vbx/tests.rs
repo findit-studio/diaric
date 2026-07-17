@@ -1,4 +1,4 @@
-//! Model-free unit tests for `diarization::cluster::vbx`.
+//! Model-free unit tests for `crate::cluster::vbx`.
 //!
 //! Heavy parity tests against pyannote's captured outputs live in
 //! `src/vbx/parity_tests.rs`. This module covers smaller, model-free

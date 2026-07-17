@@ -3,13 +3,17 @@
 //! diarization result a reproducible record of which model artifacts
 //! (segmentation, embedding, clustering/PLDA) produced it.
 
-/// Model family of the bundled segmentation model.
+/// Model family of the segmentation stage. `diaric` bundles no segmentation
+/// model — the ONNX weights live in the `diarization` crate (see
+/// `models/SOURCE.md`); this only records the family for a result's identity.
 pub const SEGMENTATION_FAMILY: &str = "pyannote-segmentation-3.0";
 /// Model family of the WeSpeaker embedding model.
 pub const WESPEAKER_FAMILY: &str = "wespeaker";
 /// Model family of the clustering / PLDA stage (the diarization decision).
 pub const DIARIZATION_FAMILY: &str = "pyannote-diarization-community-1";
-/// Version string for the bundled `segmentation-3.0.onnx`.
+/// Version tag of the `segmentation-3.0` model. The `.onnx` weights are
+/// bundled by the `diarization` crate, not by `diaric`; this records the
+/// version for a result's identity.
 pub const BUNDLED_SEGMENTATION_VERSION: &str = "segmentation-3.0";
 /// Version string for the embedded community-1 PLDA weights.
 pub const DIARIZATION_PLDA_VERSION: &str = "community-1";

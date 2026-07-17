@@ -760,7 +760,7 @@ fn build_qinit(ahc_clusters: &[usize], num_init: usize) -> DMatrix<f64> {
 /// finite vectors.
 ///
 /// Zero-norm rows return `NaN` (matching scipy's 0/0 behavior). Stage
-/// 7's `diarization::cluster::hungarian::constrained_argmax` rewrites NaN to the global
+/// 7's `crate::cluster::hungarian::constrained_argmax` rewrites NaN to the global
 /// nanmin via `np.nan_to_num`, so a zero-norm active row gets the
 /// worst possible cost and is NOT preferred over genuinely-similar
 /// embeddings. Returning `1.0` (mid-similarity) instead — as the

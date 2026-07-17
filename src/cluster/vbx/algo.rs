@@ -185,9 +185,9 @@ pub(super) fn logsumexp_rows(m: &DMatrix<f64>) -> DVector<f64> {
 /// pyannote.audio 4.0.4). Inputs:
 ///
 /// - `x`: `(T, D)` post-PLDA features (output of
-///   `diarization::plda::PldaTransform::project()` stacked into a matrix).
+///   `crate::plda::PldaTransform::project()` stacked into a matrix).
 /// - `phi`: `(D,)` eigenvalue diagonal (output of
-///   `diarization::plda::PldaTransform::phi()`). Must be strictly positive.
+///   `crate::plda::PldaTransform::phi()`). Must be strictly positive.
 /// - `qinit`: `(T, S)` initial responsibility matrix. Each row should
 ///   sum to 1 (the algorithm doesn't enforce this — pyannote's caller
 ///   pre-softmaxes a smoothed one-hot AHC initialization).

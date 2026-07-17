@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::segment::types::WindowId;
 
-/// All errors produced by `diarization::segment`.
+/// All errors produced by `crate::segment`.
 #[derive(Debug, Error)]
 pub enum Error {
   /// Construction-time validation failure for [`SegmentOptions`].

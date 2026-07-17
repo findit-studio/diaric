@@ -86,11 +86,15 @@ attribution record.
 | **BSD-2-Clause** | `src/embed/fbank.rs` — a port of `torchaudio.compliance.kaldi.fbank` (torchaudio 2.11). torchaudio is BSD-2-Clause. | PyTorch/torchaudio (BSD-2-Clause), © 2017 Facebook Inc. (Soumith Chintala). |
 | **BSD-3-Clause** | `src/cluster/hungarian/lsap.rs` (a port of SciPy's `rectangular_lsap.cpp`) and the scipy-derived PLDA eigenvector blobs (`eigenvectors_desc`, `phi_desc`). | SciPy `scipy.optimize` (BSD-3-Clause). |
 
-> **Note on the inherited NOTICE.** The `NOTICE` file is carried verbatim
-> from `diarization`. Its `pyannote/segmentation-3.0` (bundled ONNX) and
-> WeSpeaker entries describe **models the `diarization` crate bundles or
-> loads — `diaric` ships no ONNX/Torch model files**. The one artifact
-> `diaric` embeds is the CC-BY-4.0 PLDA weight set above; a downstream
-> binary linking `diaric` must reproduce that PLDA attribution.
+> **Note on the adapted NOTICE.** The `NOTICE` file is adapted from
+> `diarization`'s — materially, not carried verbatim: its preamble is
+> rewritten for `diaric`'s footprint and it adds the pyannote.audio
+> source-port attribution (section 7). Its `pyannote/segmentation-3.0`
+> (bundled ONNX) and WeSpeaker entries describe **models the `diarization`
+> crate bundles or loads — `diaric` ships no ONNX/Torch model files**. The
+> only model artifact `diaric` embeds is the CC-BY-4.0 PLDA weight set
+> above; a downstream binary linking `diaric` must reproduce that PLDA
+> attribution and the source-port notices (pyannote, SciPy, torchaudio,
+> FluidAudio).
 
 Copyright (c) 2026 FinDIT studio authors.

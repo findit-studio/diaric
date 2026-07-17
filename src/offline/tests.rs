@@ -1,4 +1,4 @@
-//! Boundary tests for `diarization::offline::diarize_offline`.
+//! Boundary tests for `crate::offline::diarize_offline`.
 //!
 //! These tests exercise the Stage-0 boundary checks added to fail
 //! fast on a malformed input *before* spill-backed

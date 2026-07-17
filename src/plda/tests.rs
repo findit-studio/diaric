@@ -1,4 +1,4 @@
-//! Module-level tests for `diarization::plda`.
+//! Module-level tests for `crate::plda`.
 //!
 //! Heavy parity tests against pyannote's captured outputs live in
 //! `tests/parity_plda.rs`. This module covers smaller, model-free

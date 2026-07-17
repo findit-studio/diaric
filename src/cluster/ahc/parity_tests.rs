@@ -1,4 +1,4 @@
-//! Parity test for `diarization::cluster::ahc::ahc_init` against pyannote's captured
+//! Parity test for `crate::cluster::ahc::ahc_init` against pyannote's captured
 //! `ahc_init_labels.npy`.
 //!
 //! Loads:

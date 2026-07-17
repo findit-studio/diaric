@@ -1,4 +1,4 @@
-//! Error type for `diarization::cluster`. Matches spec §4.3.
+//! Error type for `crate::cluster`. Matches spec §4.3.
 
 /// Errors returned by [`crate::cluster`] entrypoints.
 #[derive(Debug, thiserror::Error)]

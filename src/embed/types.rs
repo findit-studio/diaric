@@ -1,4 +1,4 @@
-//! Public output types for `diarization::embed`. All types are `Send + Sync`.
+//! Public output types for `crate::embed`. All types are `Send + Sync`.
 
 use core::time::Duration;
 

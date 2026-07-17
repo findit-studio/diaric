@@ -2,8 +2,8 @@
 //!
 //! Ports `pyannote.audio.utils.vbx.VBx` (`utils/vbx.py:27-137` in
 //! pyannote.audio 4.0.4) to Rust. Consumes the post-PLDA features
-//! produced by `diarization::plda::PldaTransform::project()` plus the
-//! eigenvalue diagonal `diarization::plda::PldaTransform::phi()`, runs
+//! produced by `crate::plda::PldaTransform::project()` plus the
+//! eigenvalue diagonal `crate::plda::PldaTransform::phi()`, runs
 //! variational EM iterations, and returns final speaker
 //! responsibilities + priors + ELBO trajectory.
 
