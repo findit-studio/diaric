@@ -67,8 +67,8 @@ use crate::{
 /// integration layer can read or override at compile time.
 ///
 /// If the embedder model is ever changed, this constant must be
-/// re-validated against fresh captured raw norms — see
-/// `tests/parity/python/capture_intermediates.py`.
+/// re-validated against fresh captured raw norms — see the
+/// `diarization` repo's `tests/parity/python/capture_intermediates.py`.
 pub(crate) const RAW_EMBEDDING_MIN_NORM: f64 = 0.01;
 
 /// Raw, **unnormalized** WeSpeaker output destined for the PLDA
@@ -310,7 +310,8 @@ impl PostXvecEmbedding {
 ///
 /// If the model weights or the embedder are ever changed, this
 /// constant must be re-validated against fresh captured data —
-/// see `tests/parity/python/capture_intermediates.py`.
+/// see the `diarization` repo's
+/// `tests/parity/python/capture_intermediates.py`.
 pub(crate) const XVEC_CENTERED_MIN_NORM: f64 = 0.1;
 
 /// Probabilistic Linear Discriminant Analysis transform. Two stages:

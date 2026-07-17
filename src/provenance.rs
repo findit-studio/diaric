@@ -1,6 +1,7 @@
 //! Model-identity accessors so a downstream pipeline reads the loaded
-//! model's family + version instead of hardcoding them. See
-//! `docs/superpowers/specs/2026-06-25-diarization-decomposition-and-provenance.md`.
+//! model's family + version instead of hardcoding them, giving each
+//! diarization result a reproducible record of which model artifacts
+//! (segmentation, embedding, clustering/PLDA) produced it.
 
 /// Model family of the bundled segmentation model.
 pub const SEGMENTATION_FAMILY: &str = "pyannote-segmentation-3.0";

@@ -1099,7 +1099,7 @@ mod tests {
   /// output, amplifying through `|fft|²` and the mel filterbank
   /// matmul to ~few ULP per log-mel cell.
   ///
-  /// To regenerate the snapshot:
+  /// To regenerate the snapshot (in the `diarization` repo):
   /// ```python
   /// # tests/parity/python/.venv/bin/python
   /// import torch, numpy as np
@@ -1167,7 +1167,8 @@ mod tests {
   /// Mel filterbank parity vs torchaudio. `#[ignore]`-gated because
   /// it depends on a captured `.npz` fixture that's not in the repo;
   /// run explicitly with `cargo test -- --ignored` after generating
-  /// the fixture via `tests/parity/python/capture_intermediates.py`.
+  /// the fixture via the `diarization` repo's
+  /// `tests/parity/python/capture_intermediates.py`.
   /// The always-on `compares_against_torchaudio_inline_chirp_snapshot`
   /// test (above) covers
   /// the kernel under CI.
@@ -1177,7 +1178,7 @@ mod tests {
     let path = std::path::PathBuf::from("/tmp/mel_bank_ref.npz");
     if !path.exists() {
       panic!(
-        "{} missing — generate via tests/parity/python/capture_intermediates.py",
+        "{} missing — generate via the diarization repo's tests/parity/python/capture_intermediates.py",
         path.display()
       );
     }
@@ -1210,7 +1211,7 @@ mod tests {
     let path = std::path::PathBuf::from("/tmp/pyannote_fbank_08_c1146.npz");
     if !path.exists() {
       panic!(
-        "{} missing — generate via tests/parity/python/capture_intermediates.py",
+        "{} missing — generate via the diarization repo's tests/parity/python/capture_intermediates.py",
         path.display()
       );
     }

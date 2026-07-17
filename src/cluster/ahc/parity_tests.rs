@@ -44,7 +44,8 @@ fn require_fixtures() {
   assert!(
     missing.is_empty(),
     "AHC parity fixtures missing: {missing:?}. \
-     Re-run `tests/parity/python/capture_intermediates.py` to regenerate."
+     Re-run the `diarization` repo's \
+     `tests/parity/python/capture_intermediates.py` to regenerate."
   );
 }
 

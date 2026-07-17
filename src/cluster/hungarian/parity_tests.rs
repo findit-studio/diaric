@@ -33,7 +33,7 @@ fn require_fixtures() {
     missing.is_empty(),
     "Hungarian parity fixture missing: {missing:?}. \
      Ships with the crate via `cargo publish`; a missing fixture is a \
-     packaging error, not an opt-out. Re-run \
+     packaging error, not an opt-out. Re-run the `diarization` repo's \
      `tests/parity/python/capture_intermediates.py` to regenerate."
   );
 }

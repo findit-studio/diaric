@@ -21,8 +21,8 @@
 //!
 //! This module is un-gated (no `ort`, no I/O): slices in, labels out. It is
 //! the dia-side realization of the online engine in the speakerkit clustering
-//! design of record (`docs/superpowers/specs/2026-07-16-clustering-backends-design.md`,
-//! architecture point 3).
+//! design of record — `docs/superpowers/specs/2026-07-16-clustering-backends-design.md`
+//! in the `findit-studio/coremlit` repo, architecture point 3.
 //!
 //! # Usage
 //! Construct an [`OnlineClusterer`] with [`OnlineClusterOptions`], then call

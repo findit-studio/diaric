@@ -40,7 +40,8 @@ fn require_fixtures(fixture_dir: &str) {
   assert!(
     missing.is_empty(),
     "reconstruct parity fixtures missing: {missing:?}. \
-     Re-run `tests/parity/python/capture_intermediates.py` to regenerate."
+     Re-run the `diarization` repo's \
+     `tests/parity/python/capture_intermediates.py` to regenerate."
   );
 }
 

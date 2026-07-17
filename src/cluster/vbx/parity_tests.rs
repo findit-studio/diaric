@@ -41,7 +41,8 @@ fn require_fixtures() {
     missing.is_empty(),
     "VBx parity fixtures missing: {missing:?}. \
      These ship with the crate via `cargo publish`; a missing \
-     fixture is a packaging error, not an opt-out. Re-run \
+     fixture is a packaging error, not an opt-out. Re-run the \
+     `diarization` repo's \
      `tests/parity/python/capture_intermediates.py` against the \
      reference clip to regenerate, or restore the files from a \
      full checkout."

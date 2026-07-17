@@ -5,7 +5,8 @@
 //! constants. The ONNX segmentation model runner (`SegmentModel`) lives in
 //! the `diarization` crate.
 //!
-//! See the crate-level docs and `docs/superpowers/specs/` for the design.
+//! See the crate-level docs and the `docs/superpowers/specs/` tree in the
+//! `findit-studio/coremlit` repo for the design.
 
 mod error;
 mod hysteresis;

@@ -55,7 +55,8 @@ fn require_fixtures() {
     missing.is_empty(),
     "PLDA parity fixtures missing: {missing:?}. \
      These ship with the crate via `cargo publish`; a missing \
-     fixture is a packaging error, not an opt-out. Re-run \
+     fixture is a packaging error, not an opt-out. Re-run the \
+     `diarization` repo's \
      `tests/parity/python/capture_intermediates.py` against the \
      reference clip to regenerate, or restore the files from a \
      full checkout."
@@ -268,7 +269,7 @@ fn phi_matches_pyannote_descending_eigenvalues() {
   }
 
   // Numerical: byte-equal-ish to pyannote's `pipeline._plda.phi`,
-  // captured into `plda_embeddings.npz` via
+  // captured into `plda_embeddings.npz` via the `diarization` repo's
   // `tests/parity/python/capture_intermediates.py`. VBx consumes
   // phi independently of the projected feature matrix, so a
   // regression that returned raw `psi` or mis-scaled eigenvalues
