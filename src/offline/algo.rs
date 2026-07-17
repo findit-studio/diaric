@@ -153,23 +153,32 @@ pub enum ShapeError {
 // `qinit` is also heap-allocated but gated by the same `MAX_QINIT_CELLS`
 // check in `pipeline::algo` before VBx is invoked.
 
-/// `const fn` predicate: `v` is finite and `>= 0` (f64). Used for
-/// `min_duration_off`, a non-negative seconds quantity passed
-/// unchanged into RTTM span post-processing. Hand-coded with `v == v`
-/// (NaN check) and an `!= INFINITY` clause so it can be `const`
-/// (`f64::is_finite` is not yet `const`).
+/// Validity predicate for [`OfflineInput`]'s `min_duration_off`: `v` is
+/// finite and `>= 0` (f64), the non-negative seconds quantity passed
+/// unchanged into RTTM span post-processing.
+///
+/// This is the exact bound [`diarize_offline`] enforces. It is public so a
+/// caller — or a wrapper crate whose own configuration forwards into
+/// [`OfflineInput`] — can pre-validate against this single authority
+/// instead of re-deriving the bound and risking drift.
+///
+/// Hand-coded with `v == v` (NaN check) and a `!= INFINITY` clause so it
+/// stays `const` (`f64::is_finite` is not yet `const`).
 #[inline]
-pub(crate) const fn check_min_duration_off(v: f64) -> bool {
+pub const fn check_min_duration_off(v: f64) -> bool {
   #[allow(clippy::eq_op)] // intentional NaN check: NaN != NaN by IEEE 754.
   let not_nan = !(v != v);
   not_nan && v >= 0.0 && v != f64::INFINITY
 }
 
-/// `const fn` predicate: `v` is `None` or `Some(finite >= 0)` (f32).
-/// Used for the optional smoothing epsilon; `None` disables smoothing
-/// (bit-exact pyannote argmax) and is always valid.
+/// Validity predicate for [`OfflineInput`]'s `smoothing_epsilon`: `None`,
+/// or `Some(finite >= 0)` (f32). `None` disables smoothing (bit-exact
+/// pyannote argmax) and is always valid.
+///
+/// The exact bound [`diarize_offline`] enforces, public for the same
+/// single-authority reason as [`check_min_duration_off`].
 #[inline]
-pub(crate) const fn check_smoothing_epsilon(v: Option<f32>) -> bool {
+pub const fn check_smoothing_epsilon(v: Option<f32>) -> bool {
   match v {
     None => true,
     Some(x) => {
