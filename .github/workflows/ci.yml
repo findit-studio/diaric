@@ -42,6 +42,7 @@ jobs:
   clippy:
     name: clippy
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -62,20 +63,32 @@ jobs:
   cross:
     name: cross
     strategy:
+      fail-fast: false
       matrix:
+        # Scalar-portability matrix aligned with the upstream `diarization`
+        # proven cross set (this crate is backend-free, so every target here
+        # applies to the moved surface). Three targets are intentionally
+        # excluded:
+        #   - `wasm32-unknown-unknown`: the transitive `errno` dep (pulled by
+        #     `rustix` <- `fs4`/`memmapix`/`tempfile`) emits a `compile_error!`
+        #     on a no-OS target ("target OS is 'unknown' or 'none'"). WASI
+        #     (`wasip1`/`wasip2`) is the supported server-wasm path and builds
+        #     cleanly (errno/rustix support WASI).
+        #   - `wasm32-unknown-emscripten`: superseded by WASI for server-side
+        #     wasm and needs the emscripten SDK the runner does not ship.
+        #   - `i686-linux-android`: Google Play has required 64-bit since 2019;
+        #     `aarch64-linux-android` / `x86_64-linux-android` cover the live
+        #     Android matrix.
         target:
           - aarch64-unknown-linux-gnu
           - aarch64-linux-android
           - aarch64-unknown-linux-musl
-          - i686-linux-android
           - x86_64-linux-android
           - i686-pc-windows-gnu
           - x86_64-pc-windows-gnu
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - riscv64gc-unknown-linux-gnu
-          - wasm32-unknown-unknown
-          - wasm32-unknown-emscripten
           - wasm32-wasip1
           - wasm32-wasip1-threads
           - wasm32-wasip2
@@ -94,6 +107,18 @@ jobs:
             ${{ runner.os }}-cross-
       - name: Install Rust
         run: rustup update stable && rustup default stable
+      - name: Install mingw-w64 (windows-gnu targets)
+        # Cross-compiling to `*-pc-windows-gnu` invokes
+        # `*-w64-mingw32-dlltool` to synthesize import libraries: both
+        # `getrandom` and the transitive `windows-sys` (via `windows-link`'s
+        # `raw-dylib` linkage) need it even for an rlib-only `cargo build`.
+        # The Ubuntu runner does not ship it by default, so install on demand
+        # for those targets only. `gcc-mingw-w64` provides both the i686 and
+        # x86_64 toolchains in one package.
+        if: contains(matrix.target, 'pc-windows-gnu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64
       - name: cargo build --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
@@ -102,6 +127,7 @@ jobs:
   build:
     name: build
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -131,6 +157,7 @@ jobs:
   test:
     name: test
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -155,7 +182,117 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Run test
-      run: cargo hack test --feature-powerset --exclude-no-default-features --exclude-features loom
+      run: cargo hack test --feature-powerset --exclude-no-default-features
+
+  # AVX2 + FMA correctness via Intel SDE. GH free runners may have AVX2
+  # natively, but our dispatcher prefers AVX-512F on hosts that have it
+  # — which would skip the AVX2 backend entirely. SDE pinned to a
+  # Haswell CPU model emulates AVX2 + FMA without AVX-512, forcing the
+  # AVX2 branch under emulation. Codex CI sweep.
+  avx2-sde:
+    name: AVX2 (Intel SDE)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache cargo build and registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-sde-avx2-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sde-avx2-
+      - name: Install Rust
+        run: rustup update stable && rustup default stable
+      - name: Run AVX2 SIMD tests under SDE
+        run: bash ci/sde_avx2.sh
+
+  # AVX-512F correctness via Intel SDE. Free GitHub runners are AMD
+  # EPYC Milan (no AVX-512) or older Intel Xeons — neither has AVX-512
+  # reliably. Without this job, a reduction-or-load mistake in the
+  # unsafe AVX-512 path would only surface on production AVX-512 hosts
+  # (Sapphire Rapids, Zen 4, etc.). SDE emulates AVX-512 in software
+  # so the dispatcher picks the AVX-512 path under emulation and the
+  # differential tests in `ops::` exercise it. Codex CI sweep.
+  avx512-sde:
+    name: AVX-512 (Intel SDE)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache cargo build and registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-sde-avx512-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sde-avx512-
+      - name: Install Rust
+        run: rustup update stable && rustup default stable
+      - name: Run AVX-512 SIMD tests under SDE
+        run: bash ci/sde_avx512.sh
+
+  # NEON correctness on a pinned native arm64 runner.
+  #
+  # The AVX SDE jobs cover x86 SIMD; the cross/test matrix
+  # `macos-latest` happens to be Apple Silicon today, but its
+  # architecture is a label-resolution detail that GitHub can change.
+  # Miri forces `--cfg diarization_force_scalar`, so it does not
+  # exercise the unsafe NEON kernels either. Without an arm64-pinned
+  # job, a load/deinterleave/tail bug in `dot_neon`, `window_mul_neon`,
+  # or `power_neon` could ship while every required safety job stayed
+  # green.
+  #
+  # Pattern mirrors `avx2-sde` / `avx512-sde`. Sets
+  # `--cfg diarization_assert_neon` so
+  # `dispatch_selects_neon_under_native_arm64` (in
+  # `ops::backend_selection_tests`) fails the build if NEON dispatch
+  # ever falls back to scalar on this runner.
+  neon-native:
+    name: NEON (native arm64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache cargo build and registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-neon-native-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-neon-native-
+      - name: Install Rust
+        run: rustup update stable && rustup default stable
+      - name: "Run fbank + ops:: tests on arm64 (NEON dispatched)"
+        # `--cfg diarization_assert_neon` enables the
+        # `dispatch_selects_neon_under_native_arm64` test in
+        # `ops::backend_selection_tests`, failing if the runner image
+        # ever stops detecting NEON. Test scope mirrors `ci/sde_avx*.sh`:
+        # ops:: + embed::fbank::tests + the parity test modules whose
+        # threshold-sensitive decisions could flip under reduction-order
+        # drift.
+        env:
+          RUSTFLAGS: "-Dwarnings --cfg diarization_assert_neon"
+        run: |
+          cargo test \
+            --lib --no-default-features \
+            -- \
+            ops:: \
+            embed::fbank::tests \
+            pipeline::parity_tests \
+            cluster::ahc::parity_tests \
+            cluster::vbx::parity_tests \
+            cluster::centroid::parity_tests \
+            offline::parity_tests \
+            reconstruct::parity_tests \
+            aggregate::parity_tests \
+            plda::parity_tests
 
   sanitizer:
     name: sanitizer
@@ -182,6 +319,7 @@ jobs:
   miri-tb:
     name: miri-tb-${{ matrix.target }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -218,6 +356,7 @@ jobs:
   miri-sb:
     name: miri-sb-${{ matrix.target }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -250,32 +389,6 @@ jobs:
       - name: Miri
         run: |
           bash ci/miri_sb.sh "${{ matrix.target }}"
-
-  loom:
-    name: loom
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7
-      - name: Cache cargo build and registry
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-loom-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-loom-
-      - name: Install Rust
-        run: rustup update nightly --no-self-update && rustup default nightly
-      - name: Loom tests
-        run: cargo test --tests --features loom
 
   # valgrind:
   #   name: valgrind
@@ -316,7 +429,6 @@ jobs:
       - cross
       - test
       - sanitizer
-      - loom
     steps:
       - uses: actions/checkout@v7
       - name: Install Rust

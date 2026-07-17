@@ -1,48 +1,198 @@
 [package]
-name = "template-rs"
-version = "0.0.0"
-edition = "2021"
-repository = "https://github.com/al8n/template-rs"
-homepage = "https://github.com/al8n/template-rs"
-documentation = "https://docs.rs/template-rs"
-description = "A template for creating Rust open-source repo on GitHub"
-license = "MIT OR Apache-2.0"
-rust-version = "1.73"
-
-[[bench]]
-path = "benches/foo.rs"
-name = "foo"
-harness = false
+name = "diaric"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+# `diaric` original source is MIT OR Apache-2.0 (caller's choice). The
+# composite license below additionally carries the obligations of the
+# third-party components this core vendors as source ports or embedded
+# data. Each term maps to a component (see the LICENSE-MAPPING section of
+# the README, and `NOTICE` for the full attribution text):
+#   - MIT OR Apache-2.0 : the original diaric/diarization Rust code
+#   - Apache-2.0        : `src/cluster/online/*` — a source port of
+#                         FluidAudio's `SpeakerManager` (Apache-2.0). This is
+#                         a MANDATORY obligation, distinct from the OR branch
+#                         above; a caller choosing MIT for the original code
+#                         still owes the FluidAudio Apache-2.0 terms.
+#   - MIT               : the pyannote.audio-derived algorithm ports — the
+#                         offline `cluster` flow (AHC/VBx/spectral/centroid),
+#                         `pipeline`, `reconstruct`, `aggregate`, the `segment`
+#                         post-processing, and the PLDA math
+#   - CC-BY-4.0         : `models/plda/*.bin` PLDA weights embedded via
+#                         `include_bytes!` (see `src/plda/loader.rs`);
+#                         attribution required (see `NOTICE`, `models/plda/SOURCE.md`)
+#   - BSD-2-Clause      : `src/embed/fbank.rs` — a port of
+#                         `torchaudio.compliance.kaldi.fbank` (torchaudio 2.11).
+#                         torchaudio is BSD-2-Clause, NOT BSD-3-Clause.
+#   - BSD-3-Clause      : `src/cluster/hungarian/lsap.rs` (a port of SciPy's
+#                         `rectangular_lsap.cpp`) and the scipy-derived PLDA
+#                         eigenvector blobs (`eigenvectors_desc`, `phi_desc`)
+# Downstream redistributors of any binary linking `diaric` MUST reproduce the
+# CC-BY-4.0 PLDA attribution and the Apache-2.0 / BSD attributions in `NOTICE`.
+license = "(MIT OR Apache-2.0) AND Apache-2.0 AND MIT AND CC-BY-4.0 AND BSD-2-Clause AND BSD-3-Clause"
+repository = "https://github.com/findit-studio/diaric"
+homepage = "https://github.com/findit-studio/diaric"
+documentation = "https://docs.rs/diaric"
+description = "Backend-free speaker-diarization core: clustering (offline AHC→VBx, online), PLDA projection, pipeline assembly, reconstruction/RTTM, kaldi-fbank DSP and embedding types, plus SIMD/mmap numeric ops. The ONNX/Torch model runners live in the `diarization` crate."
+readme = "README.md"
+# Keep `cargo package` lean. The PLDA `.bin` blobs (~530 KB) ship because
+# they are `include_bytes!`-embedded at runtime; everything else dev-only is
+# excluded. Verify with `cargo package --list --allow-dirty`.
+exclude = [
+  # PLDA `.npz` files — build-time sources for the `.bin` extraction; the
+  # `.bin` blobs are the runtime data and DO ship.
+  "models/plda/*.npz",
+  # Captured pyannote parity intermediates (~12 MB). Present in the git repo
+  # so a workspace `cargo test` runs the parity suite; excluded from the
+  # published tarball so we stay under the crates.io 10 MB limit. The
+  # `parity_fixtures_or_skip!` macro skips the parity tests cleanly when the
+  # directory is absent (published crate).
+  "tests/parity/",
+  # Dev-only trees.
+  "benches/",
+  "ci/",
+  ".github/",
+  ".codecov.yml",
+  ".gitignore",
+]
 
 [features]
-default = ["std"]
-alloc = []
-std = []
+default = []
+# `Serialize`/`Deserialize` impls for the public `*Options` / `*Config`
+# types so callers can persist diarization configuration (e.g. JSON/TOML/YAML
+# profiles). `Duration` fields go through `humantime-serde` ("250ms" / "1.5s"
+# rather than raw nanos). Off by default to keep the default dep graph minimal.
+serde = ["dep:serde", "dep:humantime-serde"]
+# Internal feature for benchmarks. Exposes `pub(crate)` kernel modules
+# (`vbx`, `ahc`, `centroid`, `pipeline`, `reconstruct`, `hungarian`, `plda`,
+# `ops`) as `pub` so external benches in `benches/*.rs` can call the inner
+# kernels directly. Not part of the public API contract — the `_` prefix
+# marks it as private.
+_bench = []
 
 [dependencies]
+mediatime = "0.1"
+thiserror = "2"
+
+# Real-valued FFT for the bit-exact torchaudio.compliance.kaldi.fbank port
+# (see `src/embed/fbank.rs`).
+realfft = "3"
+nalgebra = "0.34"
+rand = { version = "0.10", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
+
+# AHC initialization (centroid-method linkage).
+kodama = "0.3"
+
+# Allocation-free integer→decimal-string rendering for the RTTM
+# `SPEAKER_NN` label lex-sort (see `src/reconstruct`).
+itoa = "1"
+
+# Spill backend: AHC pdist / reconstruct grid / aggregate frame buffers cross
+# the configurable threshold on pathological inputs and fall back to
+# file-backed mmap so the same inputs succeed at the cost of disk I/O instead
+# of OOM-aborting. See `src/ops/spill.rs`.
+memmapix = "0.9"
+bytemuck = "1"
+tempfile = "3"
+# Cross-platform `File::allocate` for the spill backend. Reserves disk blocks
+# before mmap so writes through the mapping cannot `SIGBUS` on `ENOSPC`.
+fs4 = "1"
+
+# `rustix::fs::OFlags::TMPFILE` on Linux/Android: the spill backend opens an
+# anonymous (never-linked) tempfile so there is no create+unlink race window.
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
+# Cross-platform optional deps below. They MUST stay outside the
+# `[target.'cfg(...)']` block above — that block scopes its entries to
+# Linux/Android only.
+
+# `serde` impls for the public `*Options` / `*Config` types.
+[dependencies.serde]
+version = "1"
+optional = true
+features = ["derive"]
+
+# "humantime" string format ("250ms", "1.5s") for `Duration` fields when the
+# `serde` feature is on.
+[dependencies.humantime-serde]
+version = "1"
+optional = true
 
 [dev-dependencies]
 criterion = "0.8"
-tempfile = "3"
+# `diaric::plda` / parity tests load captured `.npz` artifacts. Production
+# code embeds the PLDA weights via `include_bytes!` and does not depend on npyz.
+npyz = { version = "0.9", features = ["npz"] }
+# Used by the `serde` feature's roundtrip tests.
+serde_json = "1"
+
+[[bench]]
+path = "benches/ops.rs"
+name = "ops"
+harness = false
+required-features = ["_bench"]
+
+[[bench]]
+path = "benches/vbx.rs"
+name = "vbx"
+harness = false
+required-features = ["_bench"]
+
+[[bench]]
+path = "benches/ahc.rs"
+name = "ahc"
+harness = false
+required-features = ["_bench"]
+
+[[bench]]
+path = "benches/centroid.rs"
+name = "centroid"
+harness = false
+required-features = ["_bench"]
+
+[[bench]]
+path = "benches/pipeline.rs"
+name = "pipeline"
+harness = false
+required-features = ["_bench"]
+
+[[bench]]
+path = "benches/segment.rs"
+name = "segment"
+harness = false
 
 [profile.bench]
 opt-level = 3
 debug = false
 codegen-units = 1
-lto = 'thin'
+lto = "thin"
 incremental = false
 debug-assertions = false
 overflow-checks = false
 rpath = false
 
 [package.metadata.docs.rs]
-all-features = true
+# `serde` is the only optional feature that adds public-API surface; the
+# `_bench` internal feature is not part of the documented API.
+features = ["serde"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
 rust_2018_idioms = "warn"
 single_use_lifetimes = "warn"
+# The `diarization_*` cfg names are carried verbatim from the source crate to
+# keep this a behaviour-preserving extraction (renaming would touch every ops
+# arch file, the fbank scalar-routing test, and the CI SDE/miri scripts). The
+# SIMD backend-selection knobs are set via `RUSTFLAGS="--cfg diarization_*"`;
+# `tarpaulin` is set by `build.rs` for coverage runs.
 unexpected_cfgs = { level = "warn", check-cfg = [
-  'cfg(all_tests)',
   'cfg(tarpaulin)',
+  'cfg(diarization_force_scalar)',
+  'cfg(diarization_disable_avx2)',
+  'cfg(diarization_disable_avx512)',
+  'cfg(diarization_assert_avx2)',
+  'cfg(diarization_assert_avx512)',
+  'cfg(diarization_assert_neon)',
 ] }

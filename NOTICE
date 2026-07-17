@@ -1,0 +1,248 @@
+diaric — third-party attribution NOTICE
+Copyright the dia / diaric authors
+
+The original `diaric` code is dual-licensed under MIT OR Apache-2.0
+(caller's choice). See LICENSE-MIT and LICENSE-APACHE for those terms.
+
+NOTE: The `pyannote/segmentation-3.0` (bundled ONNX, section 1) and
+WeSpeaker embedding (section 3) sections below describe models that the
+`diarization` crate bundles or loads — `diaric` ships NO ONNX/Torch model
+files. What `diaric` itself carries, and therefore what a binary linking
+`diaric` must honor, is:
+
+  - the pyannote.audio algorithm source ports — MIT (section 7);
+  - the CC-BY-4.0 PLDA weight set embedded via `include_bytes!` (section 2);
+  - the SciPy `rectangular_lsap` source port — BSD-3-Clause (section 4);
+  - the torchaudio kaldi-fbank source port — BSD-2-Clause (section 5);
+  - the FluidAudio `SpeakerManager` source port — Apache-2.0 (section 6).
+
+See the LICENSE-MAPPING section of README.md for the per-component mapping
+that applies to `diaric`.
+
+────────────────────────────────────────────────────────────────────────
+
+The attributions below apply per component. Sections 2, 4, 5, 6, and 7
+cover what `diaric` itself carries; sections 1 and 3 document the
+segmentation and embedding models that the `diarization` crate bundles or
+loads on top of `diaric`. A downstream redistributor MUST reproduce the
+attributions for the components its binary actually includes.
+
+────────────────────────────────────────────────────────────────────────
+1. pyannote/segmentation-3.0 (bundled by the `diarization` crate; `diaric`
+   ships no segmentation model)
+
+Embedded via `include_bytes!` in the `diarization` crate's segmentation
+model runner (`diaric` exposes no `SegmentModel` type):
+
+  models/segmentation-3.0.onnx     (5.99 MB; pyannote speaker-segmentation
+                                    model)
+
+Source:
+  HuggingFace pyannote/segmentation-3.0
+  https://huggingface.co/pyannote/segmentation-3.0
+
+License: MIT
+  Copyright (c) 2023 CNRS
+  Hervé Bredin (CNRS / IRIT) — pyannote.audio author and lead trainer.
+
+For the SHA-256 of the bundled file and the refresh procedure see the
+`diarization` crate's `models/SOURCE.md`.
+
+────────────────────────────────────────────────────────────────────────
+2. pyannote/speaker-diarization-community-1 PLDA weights
+
+Embedded in the dia binary via `include_bytes!` (see
+`src/plda/loader.rs`):
+
+  models/plda/{mean1,mean2,lda,mu,tr,psi}.bin
+  models/plda/{eigenvectors_desc,phi_desc}.bin
+                                    (raw f64 extractions / scipy-derived
+                                     eigenvectors, compiled into the
+                                     binary)
+  models/plda/xvec_transform.npz   (134 KB; build-time source for mean1,
+                                    mean2, lda)
+  models/plda/plda.npz             (134 KB; build-time source for mu,
+                                    tr, psi)
+
+Source:
+  HuggingFace pyannote/speaker-diarization-community-1
+  https://huggingface.co/pyannote/speaker-diarization-community-1
+  Snapshot revision: 3533c8cf8e369892e6b79ff1bf80f7b0286a54ee
+
+License: CC-BY-4.0
+  https://creativecommons.org/licenses/by/4.0/
+
+Attribution (per upstream `plda/README.md` in the snapshot):
+  PLDA model trained by BUT Speech@FIT (https://speech.fit.vut.cz/).
+  Integration of VBx in pyannote.audio by Jiangyu Han and Petr Pálka.
+
+For the full provenance — including the original .npz layout, the
+internal array keys, and the refresh procedure — see
+`models/plda/SOURCE.md` in this repository.
+
+────────────────────────────────────────────────────────────────────────
+3. WeSpeaker ResNet34-LM embedding model (NOT bundled)
+
+The 27 MB ONNX export is loaded by the `diarization` crate, never by
+`diaric` (which exposes no `EmbedModel` type). Because the export exceeds
+the crates.io 10 MB limit it is not shipped with either crate; the
+`diarization` crate obtains it via its own download script (Apache-2.0
+source from the WeSpeaker project; ONNX export from the `onnx-community`
+HuggingFace organization).
+
+────────────────────────────────────────────────────────────────────────
+4. SciPy `rectangular_lsap.cpp` — direct Rust port
+
+The file `src/cluster/hungarian/lsap.rs` is a Rust port of SciPy's
+`rectangular_lsap.cpp`, the C++ reference implementation backing
+`scipy.optimize.linear_sum_assignment`. Used for bit-for-bit
+tie-break parity with pyannote's `constrained_argmax`.
+
+Source:
+  scipy/scipy@main:scipy/optimize/rectangular_lsap/rectangular_lsap.cpp
+  https://github.com/scipy/scipy/blob/main/scipy/optimize/rectangular_lsap/rectangular_lsap.cpp
+
+Authors:
+  PM Larsen (port author, original SciPy contribution)
+  DF Crouse (algorithm, IEEE TAES 52(4):1679–1696, 2016 —
+  doi:10.1109/TAES.2016.140952)
+
+License: BSD-3-Clause
+
+  Copyright (c) 2008-2024, SciPy developers.
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+  1. Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above
+     copyright notice, this list of conditions and the following
+     disclaimer in the documentation and/or other materials provided
+     with the distribution.
+
+  3. Neither the name of the copyright holder nor the names of its
+     contributors may be used to endorse or promote products derived
+     from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.
+
+────────────────────────────────────────────────────────────────────────
+5. torchaudio `compliance.kaldi.fbank` — direct Rust port
+
+The file `src/embed/fbank.rs` is a bit-near-exact Rust port of
+`torchaudio.compliance.kaldi.fbank`, the kaldi-compatible filterbank
+feature extractor, following `torchaudio/compliance/kaldi.py` at
+torchaudio 2.11.
+
+Source:
+  pytorch/audio (torchaudio) v2.11.0:torchaudio/compliance/kaldi.py
+  https://github.com/pytorch/audio/blob/v2.11.0/LICENSE
+
+License: BSD-2-Clause
+
+  Copyright (c) 2017 Facebook Inc. (Soumith Chintala),
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+  1. Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above
+     copyright notice, this list of conditions and the following
+     disclaimer in the documentation and/or other materials provided
+     with the distribution.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.
+
+────────────────────────────────────────────────────────────────────────
+6. FluidAudio `SpeakerManager` — direct Rust port
+
+The `src/cluster/online` module (the greedy online centroid matcher) is
+a faithful Rust port of FluidAudio's `SpeakerManager.assignSpeaker` and
+the `Speaker` centroid machinery it drives (upstream paths under
+`Sources/FluidAudio/Diarizer/`).
+
+Source:
+  FluidInference/FluidAudio
+  https://github.com/FluidInference/FluidAudio
+
+License: Apache-2.0
+  Copyright the FluidInference Team
+  (FluidInference, info@fluidinference.com)
+
+  Licensed under the Apache License, Version 2.0 (the "License"); you
+  may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  The full license text is reproduced in `LICENSE-APACHE`. FluidAudio
+  ships no NOTICE file of its own; this attribution retains the origin
+  notice for the ported source as required by Apache-2.0 section 4.
+
+────────────────────────────────────────────────────────────────────────
+7. pyannote.audio source code — direct Rust ports
+
+The offline clustering flow and its supporting math are direct Rust ports
+of pyannote.audio's Python/PyTorch source (pyannote.audio 4.0.4). This is
+the SOURCE CODE of pyannote.audio — a DIFFERENT copyrighted work from the
+`pyannote/segmentation-3.0` model weights attributed in section 1, and it
+is what the mandatory MIT term in `Cargo.toml` refers to. Ported modules:
+
+  src/cluster/ahc, src/cluster/vbx, src/cluster/centroid, the spectral
+  clustering path, src/pipeline, src/reconstruct, src/aggregate, the
+  src/segment post-processing, and the PLDA projection math (src/plda).
+
+Source:
+  pyannote/pyannote-audio
+  https://github.com/pyannote/pyannote-audio/blob/main/LICENSE
+
+License: MIT
+  Copyright (c) 2020 CNRS
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+
+  The above copyright notice and this permission notice shall be included
+  in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

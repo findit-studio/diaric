@@ -1,0 +1,17 @@
+{
+  "pyannote_audio_version": "4.0.4",
+  "numpy_version": "2.4.4",
+  "clip_path": "/Users/user/Develop/findit-studio/dia/tests/parity/fixtures/03_dual_speaker/clip_16k.wav",
+  "clip_sha256": "15b517af8addfb21779fa4446e290ec6df21fbe70f5d4d1dc86e4ed5c0206577",
+  "artifacts": {
+    "raw_embeddings.npz": "82a6dbe56c7d0015214fbe6027c0068a90b55b118a4db90aeb6b86aa9ba0a07a",
+    "segmentations.npz": "64b52f9fa21d88018c4a9789a863b081c19924b4c57e1fabb22cf7f62160a885",
+    "plda_embeddings.npz": "8831f1baa3adc2f05b35345b0fcfb6f8974de1c32c763e84893cdbb619864dc3",
+    "ahc_init_labels.npy": "0c0331d8d6972b690d42c1fe8624e2c45d65967507463f14a8abd64b064ded67",
+    "ahc_state.npz": "3f2dec149623a5ef4af8c6e705ad6e0a7eb4aa80aced883b9c9fea4382d30673",
+    "vbx_state.npz": "04fb8b9a8847383ebc321e21386074682f2f951df96d36fda1687edaccd32878",
+    "clustering.npz": "2deeb24030537653f01dc78da54814156e21d963f167cabffbda8800b0a30080",
+    "reconstruction.npz": "afa5c0cc811f9e73ad2fdfc329d9d54ea3eee02d1bead26d6e02c49b12225522",
+    "reference.rttm": "82b91141519a42baf68bedb97dc1964f5a89c31d8774888187d509371988e3dc"
+  }
+}
