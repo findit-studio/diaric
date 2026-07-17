@@ -45,7 +45,7 @@ Until published to crates.io, depend on a pinned git revision:
 
 ```toml
 [dependencies]
-diaric = { git = "https://github.com/findit-studio/diaric", rev = "..." }
+diaric = "0.1"
 ```
 
 Enable `serde` for `Serialize`/`Deserialize` on the public `*Options`
