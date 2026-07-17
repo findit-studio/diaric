@@ -2,9 +2,11 @@
 //!
 //! Ports `pyannote.audio.utils.vbx.vbx_setup` plus its inner `xvec_tf`
 //! / `plda_tf` lambdas (`utils/vbx.py:181-218` in pyannote.audio
-//! 4.0.4) to Rust. Loads two `.npz` weight files (shipped with
-//! `pyannote/speaker-diarization-community-1`, redistributed under
-//! `models/plda/`) and exposes a deterministic two-stage projection:
+//! 4.0.4) to Rust. Embeds the
+//! `pyannote/speaker-diarization-community-1` weights via
+//! `include_bytes!` as raw `.bin` blobs under `models/plda/`,
+//! extracted offline from the upstream `.npz` files (see
+//! `loader.rs`), and exposes a deterministic two-stage projection:
 //!
 //! ```text
 //! 256-d WeSpeaker embedding (f32)
