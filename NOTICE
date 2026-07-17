@@ -10,6 +10,7 @@ WeSpeaker embedding (section 3) sections below describe models that the
 files. What `diaric` itself carries, and therefore what a binary linking
 `diaric` must honor, is:
 
+  - the pyannote.audio algorithm source ports — MIT (section 7);
   - the CC-BY-4.0 PLDA weight set embedded via `include_bytes!` (section 2);
   - the SciPy `rectangular_lsap` source port — BSD-3-Clause (section 4);
   - the torchaudio kaldi-fbank source port — BSD-2-Clause (section 5);
@@ -20,11 +21,11 @@ that applies to `diaric`.
 
 ────────────────────────────────────────────────────────────────────────
 
-The attributions below apply per component. Sections 2, 4, 5, and 6 cover
-what `diaric` itself carries; sections 1 and 3 document the segmentation
-and embedding models that the `diarization` crate bundles or loads on top
-of `diaric`. A downstream redistributor MUST reproduce the attributions
-for the components its binary actually includes.
+The attributions below apply per component. Sections 2, 4, 5, 6, and 7
+cover what `diaric` itself carries; sections 1 and 3 document the
+segmentation and embedding models that the `diarization` crate bundles or
+loads on top of `diaric`. A downstream redistributor MUST reproduce the
+attributions for the components its binary actually includes.
 
 ────────────────────────────────────────────────────────────────────────
 1. pyannote/segmentation-3.0 (bundled by the `diarization` crate; `diaric`
@@ -206,3 +207,42 @@ License: Apache-2.0
   The full license text is reproduced in `LICENSE-APACHE`. FluidAudio
   ships no NOTICE file of its own; this attribution retains the origin
   notice for the ported source as required by Apache-2.0 section 4.
+
+────────────────────────────────────────────────────────────────────────
+7. pyannote.audio source code — direct Rust ports
+
+The offline clustering flow and its supporting math are direct Rust ports
+of pyannote.audio's Python/PyTorch source (pyannote.audio 4.0.4). This is
+the SOURCE CODE of pyannote.audio — a DIFFERENT copyrighted work from the
+`pyannote/segmentation-3.0` model weights attributed in section 1, and it
+is what the mandatory MIT term in `Cargo.toml` refers to. Ported modules:
+
+  src/cluster/ahc, src/cluster/vbx, src/cluster/centroid, the spectral
+  clustering path, src/pipeline, src/reconstruct, src/aggregate, the
+  src/segment post-processing, and the PLDA projection math (src/plda).
+
+Source:
+  pyannote/pyannote-audio
+  https://github.com/pyannote/pyannote-audio/blob/main/LICENSE
+
+License: MIT
+  Copyright (c) 2020 CNRS
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+
+  The above copyright notice and this permission notice shall be included
+  in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
