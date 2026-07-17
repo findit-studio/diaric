@@ -876,7 +876,7 @@ impl<T: Pod> SpillBytes<T> {
   /// instead `freeze`s its existing `SpillBytesMut`, so long ranges
   /// retain their mmap backing all the way through the carrier.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(crate) fn from_vec(v: Vec<T>) -> Self {
+  pub fn from_vec(v: Vec<T>) -> Self {
     let len = v.len();
     Self {
       data: SpillBytesData::Owned(Arc::new(v)),
