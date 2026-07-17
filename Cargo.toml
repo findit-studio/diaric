@@ -3,20 +3,33 @@ name = "diaric"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-# `diaric` original source is MIT OR Apache-2.0 (caller's choice).
-# The composite license below is carried verbatim from the upstream
-# `diarization` crate this core was extracted from; each term maps to a
-# component (see the LICENSE-MAPPING section of the README):
+# `diaric` original source is MIT OR Apache-2.0 (caller's choice). The
+# composite license below additionally carries the obligations of the
+# third-party components this core vendors as source ports or embedded
+# data. Each term maps to a component (see the LICENSE-MAPPING section of
+# the README, and `NOTICE` for the full attribution text):
 #   - MIT OR Apache-2.0 : the original diaric/diarization Rust code
-#   - MIT               : `src/cluster/*` (pyannote / scipy lineage) and the
-#                         PLDA math ported from pyannote-community-1
+#   - Apache-2.0        : `src/cluster/online/*` — a source port of
+#                         FluidAudio's `SpeakerManager` (Apache-2.0). This is
+#                         a MANDATORY obligation, distinct from the OR branch
+#                         above; a caller choosing MIT for the original code
+#                         still owes the FluidAudio Apache-2.0 terms.
+#   - MIT               : the pyannote.audio-derived algorithm ports — the
+#                         offline `cluster` flow (AHC/VBx/spectral/centroid),
+#                         `pipeline`, `reconstruct`, `aggregate`, the `segment`
+#                         post-processing, and the PLDA math
 #   - CC-BY-4.0         : `models/plda/*.bin` PLDA weights embedded via
 #                         `include_bytes!` (see `src/plda/loader.rs`);
 #                         attribution required (see `NOTICE`, `models/plda/SOURCE.md`)
-#   - BSD-3-Clause      : `src/embed/fbank.rs` (torchaudio kaldi-fbank port)
+#   - BSD-2-Clause      : `src/embed/fbank.rs` — a port of
+#                         `torchaudio.compliance.kaldi.fbank` (torchaudio 2.11).
+#                         torchaudio is BSD-2-Clause, NOT BSD-3-Clause.
+#   - BSD-3-Clause      : `src/cluster/hungarian/lsap.rs` (a port of SciPy's
+#                         `rectangular_lsap.cpp`) and the scipy-derived PLDA
+#                         eigenvector blobs (`eigenvectors_desc`, `phi_desc`)
 # Downstream redistributors of any binary linking `diaric` MUST reproduce the
-# CC-BY-4.0 PLDA attribution.
-license = "(MIT OR Apache-2.0) AND MIT AND CC-BY-4.0 AND BSD-3-Clause"
+# CC-BY-4.0 PLDA attribution and the Apache-2.0 / BSD attributions in `NOTICE`.
+license = "(MIT OR Apache-2.0) AND Apache-2.0 AND MIT AND CC-BY-4.0 AND BSD-2-Clause AND BSD-3-Clause"
 repository = "https://github.com/findit-studio/diaric"
 homepage = "https://github.com/findit-studio/diaric"
 documentation = "https://docs.rs/diaric"

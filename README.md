@@ -66,24 +66,25 @@ model runners that need them are in `diarization`.
 `diaric` is offered under the composite SPDX expression
 
 ```text
-(MIT OR Apache-2.0) AND MIT AND CC-BY-4.0 AND BSD-3-Clause
+(MIT OR Apache-2.0) AND Apache-2.0 AND MIT AND CC-BY-4.0 AND BSD-2-Clause AND BSD-3-Clause
 ```
 
-carried verbatim from the upstream `diarization` crate. See the
-`LICENSE-APACHE`, `LICENSE-MIT`, and inherited `NOTICE` files for the full
-third-party attribution record.
+The `(MIT OR Apache-2.0)` branch is the original `diaric` code (caller's
+choice); the remaining terms are mandatory obligations from the third-party
+components this core vendors as source ports or embedded data. See the
+`LICENSE-APACHE`, `LICENSE-MIT`, and `NOTICE` files for the full third-party
+attribution record.
 
 ### LICENSE-MAPPING — which term covers what
 
 | SPDX term | Component in `diaric` | Provenance |
 |---|---|---|
 | **MIT OR Apache-2.0** | The original `diaric` / `diarization` Rust code (caller's choice). | — |
-| **MIT** | `cluster`, `pipeline`, `reconstruct`, `aggregate`, and the segmentation post-processing in `segment` — algorithm ports of `pyannote.audio`. | [pyannote/pyannote-audio](https://github.com/pyannote/pyannote-audio) (MIT) |
+| **Apache-2.0** | `cluster::online` — the greedy online centroid matcher, a source port of FluidAudio's `SpeakerManager`. A **mandatory** obligation, not the OR branch above: choosing MIT for the original code does not discharge it. | [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0), FluidInference Team. |
+| **MIT** | The offline `cluster` flow (AHC/VBx/spectral/centroid), `pipeline`, `reconstruct`, `aggregate`, the `segment` post-processing, and the PLDA math — algorithm ports of `pyannote.audio`. | [pyannote/pyannote-audio](https://github.com/pyannote/pyannote-audio) (MIT) |
 | **CC-BY-4.0** | `models/plda/*.bin` — PLDA weights **embedded into the compiled binary** via `include_bytes!` (`src/plda/loader.rs`). Attribution is **required** in any redistributed binary. | [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1); trained by BUT Speech@FIT. See [models/plda/SOURCE.md](models/plda/SOURCE.md). |
-| **BSD-3-Clause** | `src/cluster/hungarian/lsap.rs` (a port of SciPy's `rectangular_lsap.cpp`) and `src/embed/fbank.rs` (a port of `torchaudio.compliance.kaldi.fbank`). | SciPy (`scipy.optimize`) and PyTorch/torchaudio. |
-
-The online clusterer (`cluster::online`) is a port of
-[FluidAudio](https://github.com/FluidInference/FluidAudio)'s `SpeakerManager`.
+| **BSD-2-Clause** | `src/embed/fbank.rs` — a port of `torchaudio.compliance.kaldi.fbank` (torchaudio 2.11). torchaudio is BSD-2-Clause. | PyTorch/torchaudio (BSD-2-Clause), © 2017 Facebook Inc. (Soumith Chintala). |
+| **BSD-3-Clause** | `src/cluster/hungarian/lsap.rs` (a port of SciPy's `rectangular_lsap.cpp`) and the scipy-derived PLDA eigenvector blobs (`eigenvectors_desc`, `phi_desc`). | SciPy `scipy.optimize` (BSD-3-Clause). |
 
 > **Note on the inherited NOTICE.** The `NOTICE` file is carried verbatim
 > from `diarization`. Its `pyannote/segmentation-3.0` (bundled ONNX) and

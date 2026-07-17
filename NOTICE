@@ -1,16 +1,22 @@
-diaric — inherited third-party attribution NOTICE
+diaric — third-party attribution NOTICE
 Copyright the dia / diaric authors
 
-This product is dual-licensed under MIT OR Apache-2.0 (caller's choice).
-See LICENSE-MIT and LICENSE-APACHE for those terms.
+The original `diaric` code is dual-licensed under MIT OR Apache-2.0
+(caller's choice). See LICENSE-MIT and LICENSE-APACHE for those terms.
 
-NOTE: This NOTICE is carried verbatim from the upstream `diarization`
-crate. The `pyannote/segmentation-3.0` (bundled ONNX) and WeSpeaker
-embedding sections below describe models that `diarization` bundles or
-loads — `diaric` ships NO ONNX/Torch model files. The only third-party
-artifact `diaric` embeds is the CC-BY-4.0 PLDA weight set (section 2). See
-the LICENSE-MAPPING section of README.md for the per-component mapping that
-applies to `diaric`.
+NOTE: The `pyannote/segmentation-3.0` (bundled ONNX, section 1) and
+WeSpeaker embedding (section 3) sections below describe models that the
+`diarization` crate bundles or loads — `diaric` ships NO ONNX/Torch model
+files. What `diaric` itself carries, and therefore what a binary linking
+`diaric` must honor, is:
+
+  - the CC-BY-4.0 PLDA weight set embedded via `include_bytes!` (section 2);
+  - the SciPy `rectangular_lsap` source port — BSD-3-Clause (section 4);
+  - the torchaudio kaldi-fbank source port — BSD-2-Clause (section 5);
+  - the FluidAudio `SpeakerManager` source port — Apache-2.0 (section 6).
+
+See the LICENSE-MAPPING section of README.md for the per-component mapping
+that applies to `diaric`.
 
 ────────────────────────────────────────────────────────────────────────
 
@@ -130,3 +136,70 @@ License: BSD-3-Clause
   LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
   ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
   POSSIBILITY OF SUCH DAMAGE.
+
+────────────────────────────────────────────────────────────────────────
+5. torchaudio `compliance.kaldi.fbank` — direct Rust port
+
+The file `src/embed/fbank.rs` is a bit-near-exact Rust port of
+`torchaudio.compliance.kaldi.fbank`, the kaldi-compatible filterbank
+feature extractor, following `torchaudio/compliance/kaldi.py` at
+torchaudio 2.11.
+
+Source:
+  pytorch/audio (torchaudio) v2.11.0:torchaudio/compliance/kaldi.py
+  https://github.com/pytorch/audio/blob/v2.11.0/LICENSE
+
+License: BSD-2-Clause
+
+  Copyright (c) 2017 Facebook Inc. (Soumith Chintala),
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+  1. Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above
+     copyright notice, this list of conditions and the following
+     disclaimer in the documentation and/or other materials provided
+     with the distribution.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.
+
+────────────────────────────────────────────────────────────────────────
+6. FluidAudio `SpeakerManager` — direct Rust port
+
+The `src/cluster/online` module (the greedy online centroid matcher) is
+a faithful Rust port of FluidAudio's `SpeakerManager.assignSpeaker` and
+the `Speaker` centroid machinery it drives (upstream paths under
+`Sources/FluidAudio/Diarizer/`).
+
+Source:
+  FluidInference/FluidAudio
+  https://github.com/FluidInference/FluidAudio
+
+License: Apache-2.0
+  Copyright the FluidInference Team
+  (FluidInference, info@fluidinference.com)
+
+  Licensed under the Apache License, Version 2.0 (the "License"); you
+  may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  The full license text is reproduced in `LICENSE-APACHE`. FluidAudio
+  ships no NOTICE file of its own; this attribution retains the origin
+  notice for the ported source as required by Apache-2.0 section 4.
