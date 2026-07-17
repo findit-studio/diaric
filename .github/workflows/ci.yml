@@ -42,6 +42,7 @@ jobs:
   clippy:
     name: clippy
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -62,20 +63,32 @@ jobs:
   cross:
     name: cross
     strategy:
+      fail-fast: false
       matrix:
+        # Scalar-portability matrix aligned with the upstream `diarization`
+        # proven cross set (this crate is backend-free, so every target here
+        # applies to the moved surface). Three targets are intentionally
+        # excluded:
+        #   - `wasm32-unknown-unknown`: the transitive `errno` dep (pulled by
+        #     `rustix` <- `fs4`/`memmapix`/`tempfile`) emits a `compile_error!`
+        #     on a no-OS target ("target OS is 'unknown' or 'none'"). WASI
+        #     (`wasip1`/`wasip2`) is the supported server-wasm path and builds
+        #     cleanly (errno/rustix support WASI).
+        #   - `wasm32-unknown-emscripten`: superseded by WASI for server-side
+        #     wasm and needs the emscripten SDK the runner does not ship.
+        #   - `i686-linux-android`: Google Play has required 64-bit since 2019;
+        #     `aarch64-linux-android` / `x86_64-linux-android` cover the live
+        #     Android matrix.
         target:
           - aarch64-unknown-linux-gnu
           - aarch64-linux-android
           - aarch64-unknown-linux-musl
-          - i686-linux-android
           - x86_64-linux-android
           - i686-pc-windows-gnu
           - x86_64-pc-windows-gnu
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - riscv64gc-unknown-linux-gnu
-          - wasm32-unknown-unknown
-          - wasm32-unknown-emscripten
           - wasm32-wasip1
           - wasm32-wasip1-threads
           - wasm32-wasip2
@@ -94,6 +107,18 @@ jobs:
             ${{ runner.os }}-cross-
       - name: Install Rust
         run: rustup update stable && rustup default stable
+      - name: Install mingw-w64 (windows-gnu targets)
+        # Cross-compiling to `*-pc-windows-gnu` invokes
+        # `*-w64-mingw32-dlltool` to synthesize import libraries: both
+        # `getrandom` and the transitive `windows-sys` (via `windows-link`'s
+        # `raw-dylib` linkage) need it even for an rlib-only `cargo build`.
+        # The Ubuntu runner does not ship it by default, so install on demand
+        # for those targets only. `gcc-mingw-w64` provides both the i686 and
+        # x86_64 toolchains in one package.
+        if: contains(matrix.target, 'pc-windows-gnu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64
       - name: cargo build --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
@@ -102,6 +127,7 @@ jobs:
   build:
     name: build
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -131,6 +157,7 @@ jobs:
   test:
     name: test
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -292,6 +319,7 @@ jobs:
   miri-tb:
     name: miri-tb-${{ matrix.target }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -328,6 +356,7 @@ jobs:
   miri-sb:
     name: miri-sb-${{ matrix.target }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
