@@ -6,7 +6,7 @@ These two `.npz` files are the build-time source for the runtime `.bin`
 blobs that `diaric` embeds via `include_bytes!`; regenerate the blobs
 afterwards with:
 
-  uv run --with numpy python scripts/extract-plda-blobs.sh          # 6 blobs
+  bash scripts/extract-plda-blobs.sh                                # 6 blobs
   uv run --with numpy --with scipy \
       python scripts/extract-plda-eigenvectors.py                   # 2 blobs
 
