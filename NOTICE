@@ -20,16 +20,18 @@ that applies to `diaric`.
 
 ────────────────────────────────────────────────────────────────────────
 
-This product incorporates third-party model files. Downstream
-redistributors of any binary linking `dia` MUST reproduce the
-attributions below.
+The attributions below apply per component. Sections 2, 4, 5, and 6 cover
+what `diaric` itself carries; sections 1 and 3 document the segmentation
+and embedding models that the `diarization` crate bundles or loads on top
+of `diaric`. A downstream redistributor MUST reproduce the attributions
+for the components its binary actually includes.
 
 ────────────────────────────────────────────────────────────────────────
-1. pyannote/segmentation-3.0 (bundled when feature `bundled-segmentation`
-   is enabled, which is the default)
+1. pyannote/segmentation-3.0 (bundled by the `diarization` crate; `diaric`
+   ships no segmentation model)
 
-Embedded in the dia binary via `include_bytes!` (see
-`src/segment/model.rs::SegmentModel::bundled`):
+Embedded via `include_bytes!` in the `diarization` crate's segmentation
+model runner (`diaric` exposes no `SegmentModel` type):
 
   models/segmentation-3.0.onnx     (5.99 MB; pyannote speaker-segmentation
                                     model)
@@ -42,8 +44,8 @@ License: MIT
   Copyright (c) 2023 CNRS
   Hervé Bredin (CNRS / IRIT) — pyannote.audio author and lead trainer.
 
-For the SHA-256 of the bundled file and the refresh procedure see
-`models/SOURCE.md`.
+For the SHA-256 of the bundled file and the refresh procedure see the
+`diarization` crate's `models/SOURCE.md`.
 
 ────────────────────────────────────────────────────────────────────────
 2. pyannote/speaker-diarization-community-1 PLDA weights
@@ -80,11 +82,12 @@ internal array keys, and the refresh procedure — see
 ────────────────────────────────────────────────────────────────────────
 3. WeSpeaker ResNet34-LM embedding model (NOT bundled)
 
-The 27 MB ONNX export exceeds the crates.io 10 MB hard limit and is
-therefore NOT shipped with the crate. Callers obtain it via
-`scripts/download-embed-model.sh` (Apache-2.0 source from the
-WeSpeaker project; ONNX export from the `onnx-community` HuggingFace
-organization).
+The 27 MB ONNX export is loaded by the `diarization` crate, never by
+`diaric` (which exposes no `EmbedModel` type). Because the export exceeds
+the crates.io 10 MB limit it is not shipped with either crate; the
+`diarization` crate obtains it via its own download script (Apache-2.0
+source from the WeSpeaker project; ONNX export from the `onnx-community`
+HuggingFace organization).
 
 ────────────────────────────────────────────────────────────────────────
 4. SciPy `rectangular_lsap.cpp` — direct Rust port
