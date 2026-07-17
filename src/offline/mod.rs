@@ -44,4 +44,4 @@ mod parity_tests;
 #[cfg(test)]
 mod tests;
 
-pub use algo::{Error, OfflineInput, OfflineOutput, diarize_offline};
+pub use algo::{Error, OfflineInput, OfflineOutput, ShapeError, diarize_offline};

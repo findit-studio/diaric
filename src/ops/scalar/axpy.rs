@@ -37,7 +37,6 @@ pub fn axpy(y: &mut [f64], alpha: f64, x: &[f64]) {
 /// `axpy_f32` dispatcher; arch-specific overrides can
 /// be added later without touching call sites.
 #[inline]
-#[allow(dead_code)]
 pub fn axpy_f32(y: &mut [f32], alpha: f32, x: &[f32]) {
   debug_assert_eq!(y.len(), x.len(), "axpy_f32: length mismatch");
   for i in 0..y.len() {

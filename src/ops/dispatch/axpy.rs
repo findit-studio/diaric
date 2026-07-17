@@ -67,12 +67,6 @@ pub fn axpy(y: &mut [f64], alpha: f64, x: &[f64]) {
 ///
 /// If `y.len() != x.len()`.
 #[inline]
-// `axpy_f32` has no caller in `diaric` itself (its consumer, the
-// embedding aggregator, is in the `diarization` crate). It is kept as a
-// primitive so the SIMD dispatch policy stays in one place;
-// `#[allow(dead_code)]` prevents the unused-fn warning from becoming a
-// hard error under `RUSTFLAGS=-Dwarnings`.
-#[allow(dead_code)]
 pub fn axpy_f32(y: &mut [f32], alpha: f32, x: &[f32]) {
   assert_eq!(
     y.len(),

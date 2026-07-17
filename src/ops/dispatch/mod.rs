@@ -11,7 +11,7 @@ mod kahan;
 mod lse;
 mod pdist_euclidean;
 
-pub use axpy::axpy;
+pub use axpy::{axpy, axpy_f32};
 pub use dot::dot;
 pub use kahan::{kahan_dot, kahan_sum};
 pub use lse::logsumexp_row;

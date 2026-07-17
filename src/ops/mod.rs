@@ -63,7 +63,7 @@ pub mod spill;
 
 #[cfg(feature = "_bench")]
 pub use dispatch::pdist_euclidean;
-pub use dispatch::{axpy, dot, kahan_dot, kahan_sum, logsumexp_row};
+pub use dispatch::{axpy, axpy_f32, dot, kahan_dot, kahan_sum, logsumexp_row};
 
 // ─── runtime CPU-feature detection ───────────────────────────────────
 //

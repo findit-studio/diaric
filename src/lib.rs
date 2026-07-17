@@ -28,6 +28,17 @@ pub mod ops;
 #[cfg(not(feature = "_bench"))]
 pub(crate) mod ops;
 
+/// f32 fused multiply-add primitive: `y[i] += alpha * x[i]` for each `i`.
+///
+/// The single numeric primitive `diaric` publishes across the crate
+/// boundary. The WeSpeaker embedding aggregator in the `diarization`
+/// crate sums per-window embeddings into a 256-d accumulator through the
+/// exact SIMD-dispatched kernel the internal algorithm modules use, so
+/// the two crates cannot drift on the aggregation arithmetic. See
+/// [`ops::axpy_f32`](crate::ops::axpy_f32) for the backend-selection and
+/// panic contract.
+pub use ops::axpy_f32;
+
 /// Spill-buffer configuration types reachable from public API surfaces
 /// (e.g. [`OfflineInput::with_spill_options`](crate::offline::OfflineInput::with_spill_options),
 /// [`AssignEmbeddingsInput`](crate::pipeline::AssignEmbeddingsInput) and

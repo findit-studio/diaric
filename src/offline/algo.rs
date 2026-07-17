@@ -49,22 +49,33 @@ pub enum Error {
 /// Specific shape-violation reasons for [`Error::Shape`].
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq)]
 pub enum ShapeError {
+  /// `num_chunks` was zero; at least one chunk is required.
   #[error("num_chunks must be at least 1")]
   ZeroNumChunks,
+  /// `num_speakers` was zero; at least one speaker slot is required.
   #[error("num_speakers must be at least 1")]
   ZeroNumSpeakers,
+  /// `num_frames_per_chunk` was zero; at least one frame is required.
   #[error("num_frames_per_chunk must be at least 1")]
   ZeroNumFramesPerChunk,
+  /// `num_chunks * num_speakers * EMBEDDING_DIM` overflowed `usize`.
   #[error("raw_embeddings size overflow")]
   RawEmbeddingsOverflow,
+  /// `raw_embeddings.len()` did not equal
+  /// `num_chunks * num_speakers * EMBEDDING_DIM`.
   #[error("raw_embeddings.len() must equal num_chunks * num_speakers * EMBEDDING_DIM")]
   RawEmbeddingsLenMismatch,
+  /// `num_chunks * num_frames_per_chunk * num_speakers` overflowed `usize`.
   #[error("segmentations size overflow")]
   SegmentationsOverflow,
+  /// `segmentations.len()` did not equal
+  /// `num_chunks * num_frames_per_chunk * num_speakers`.
   #[error("segmentations.len() must equal num_chunks * num_frames_per_chunk * num_speakers")]
   SegmentationsLenMismatch,
+  /// The input `samples` slice was empty (audio entrypoint only).
   #[error("samples is empty")]
   EmptySamples,
+  /// `step_samples` was zero; the chunk planner requires a positive step.
   #[error("step_samples must be > 0")]
   ZeroStepSamples,
   /// `step_samples` exceeds `WINDOW_SAMPLES`. The owned/streaming
@@ -74,7 +85,12 @@ pub enum ShapeError {
   /// or embedded — silent data loss returning `Ok(_)` with missing
   /// speech. Reject at validation rather than letting it propagate.
   #[error("step_samples ({step}) must not exceed WINDOW_SAMPLES ({window})")]
-  StepSamplesExceedsWindow { step: u32, window: u32 },
+  StepSamplesExceedsWindow {
+    /// The configured step, in samples.
+    step: u32,
+    /// The window length, in samples (`WINDOW_SAMPLES`).
+    window: u32,
+  },
   /// `onset` is outside the documented `(0.0, 1.0]` range. Hard
   /// segmentations are 0/1; the per-frame mask `seg >= onset`
   /// degenerates: with `onset > 1.0` no frame is active (empty
@@ -82,21 +98,30 @@ pub enum ShapeError {
   /// (corrupted frame masks, embeddings, and counts). NaN turns
   /// every comparison false and behaves like `onset > 1.0`.
   #[error("onset ({onset}) must be finite in (0.0, 1.0]")]
-  OnsetOutOfRange { onset: f32 },
+  OnsetOutOfRange {
+    /// The out-of-range onset value.
+    onset: f32,
+  },
   /// `min_duration_off` is NaN/±inf or negative. RTTM span-merge
   /// reads this as a non-negative seconds quantity; `+inf` merges
   /// every same-cluster gap, `NaN` silently disables the merge
   /// (every comparison becomes false), and negative values are
   /// nonsensical. Catches serde-bypassed configs.
   #[error("min_duration_off ({value}) must be finite and >= 0")]
-  MinDurationOffOutOfRange { value: f64 },
+  MinDurationOffOutOfRange {
+    /// The offending `min_duration_off` value.
+    value: f64,
+  },
   /// `smoothing_epsilon` is `Some(NaN/±inf)` or `Some(< 0)`. The
   /// smoothing step compares activation differences against this
   /// epsilon; `Some(+inf)` collapses top-k onto stable index order,
   /// `Some(NaN)` makes every comparison false. `None` is the
   /// pyannote-argmax bit-exact path and is always valid.
   #[error("smoothing_epsilon ({value:?}) must be None or Some(finite >= 0)")]
-  SmoothingEpsilonOutOfRange { value: Option<f32> },
+  SmoothingEpsilonOutOfRange {
+    /// The offending `smoothing_epsilon` value.
+    value: Option<f32>,
+  },
 }
 
 // ── Memory budget for `diarize_offline` ───────────────────────────
