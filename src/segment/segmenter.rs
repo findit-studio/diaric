@@ -649,6 +649,35 @@ impl Segmenter {
     self.pending.len()
   }
 
+  /// Whether a stashed inference is waiting to be retried by an external
+  /// streaming driver.
+  ///
+  /// The `diarization` crate's ONNX segmentation driver (`Segmenter`'s
+  /// `process_samples` / `finish_stream` extension methods) parks the
+  /// in-flight `(WindowId, samples)` here when `infer` or
+  /// [`push_inference`](Self::push_inference) fails mid-drain, then retries it
+  /// before pushing new audio. This peeks the stash;
+  /// [`take_pending_inference`](Self::take_pending_inference) pops it and
+  /// [`stash_pending_inference`](Self::stash_pending_inference) re-parks it.
+  pub fn has_pending_inference(&self) -> bool {
+    self.pending_inference.is_some()
+  }
+
+  /// Take the stashed inference (window id + owned samples) for an external
+  /// streaming driver to retry, or `None` when nothing is stashed. See
+  /// [`has_pending_inference`](Self::has_pending_inference).
+  pub fn take_pending_inference(&mut self) -> Option<(WindowId, alloc::boxed::Box<[f32]>)> {
+    self.pending_inference.take()
+  }
+
+  /// Re-park an inference `(id, samples)` for retry on the next drive, after
+  /// an external driver's `infer` or
+  /// [`push_inference`](Self::push_inference) failed mid-drain. Pairs with
+  /// [`take_pending_inference`](Self::take_pending_inference).
+  pub fn stash_pending_inference(&mut self, id: WindowId, samples: alloc::boxed::Box<[f32]>) {
+    self.pending_inference = Some((id, samples));
+  }
+
   /// Number of input samples currently buffered (pushed via
   /// [`push_samples`](Self::push_samples) but not yet released because
   /// they're still part of some not-yet-scheduled or in-flight window).
