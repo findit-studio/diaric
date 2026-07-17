@@ -4,11 +4,16 @@
 //! and asserts that the Rust transforms reproduce the captured pyannote
 //! outputs within float-cast tolerance.
 //!
-//! **Hard-fails** when fixtures are absent. The fixtures are committed
-//! to the repo and shipped via `cargo publish`; a missing fixture is a
-//! packaging or sparse-checkout error, never an opt-out. An earlier
-//! silent `eprintln` skip let the high-risk algorithm port silently
-//! stop being parity-checked when `cargo test` reported all green.
+//! The fixtures live in the git repo under `tests/parity/fixtures/` but
+//! are excluded from the published crate tarball (`[package] exclude` in
+//! `Cargo.toml`, to stay under the crates.io size limit). Each test calls
+//! `parity_fixtures_or_skip!` first: in the published crate the fixtures
+//! are absent and the test skips cleanly; in a workspace checkout they are
+//! present, so `require_fixtures` then **hard-fails** if any is missing — a
+//! sparse-checkout or packaging error, never a silent opt-out. (An earlier
+//! design skipped unconditionally, which let the high-risk algorithm port
+//! stop being parity-checked in-repo while `cargo test` still reported all
+//! green; the in-repo hard-fail prevents that regression.)
 //!
 //! Lives **inside** the crate (under `#[cfg(test)]`) rather than as an
 //! integration test in `tests/`. The reason is that
@@ -37,10 +42,12 @@ fn fixture(rel: &str) -> PathBuf {
   repo_root().join(rel)
 }
 
-/// Hard-fail if the captured fixtures are absent. The fixtures are
-/// checked into the repo (KB-sized) and shipped via `cargo publish`,
-/// so a missing fixture is a packaging or sparse-checkout error,
-/// never a normal-flow case.
+/// Hard-fail if the captured fixtures are absent. Runs only after
+/// `parity_fixtures_or_skip!` has confirmed the fixture directory exists
+/// (a workspace checkout), so absence here means an otherwise-complete
+/// checkout is missing a committed fixture — a sparse-checkout or
+/// packaging error, never a normal-flow case. The published crate tarball
+/// excludes the fixtures and skips before reaching this point.
 fn require_fixtures() {
   let required = [
     "tests/parity/fixtures/01_dialogue/raw_embeddings.npz",
@@ -54,9 +61,9 @@ fn require_fixtures() {
   assert!(
     missing.is_empty(),
     "PLDA parity fixtures missing: {missing:?}. \
-     These ship with the crate via `cargo publish`; a missing \
-     fixture is a packaging error, not an opt-out. Re-run the \
-     `diarization` repo's \
+     The published crate excludes these and skips earlier; reaching this \
+     assert means a workspace checkout is missing a committed fixture. \
+     Re-run the `diarization` repo's \
      `tests/parity/python/capture_intermediates.py` against the \
      reference clip to regenerate, or restore the files from a \
      full checkout."

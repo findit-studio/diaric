@@ -9,7 +9,9 @@
 //!   pyannote averages over.
 //! - `clustering.npz['centroids']` for the ground-truth centroid matrix.
 //!
-//! Asserts max element-wise diff ≤ 1e-9. **Hard-fails** on missing fixtures.
+//! Asserts max element-wise diff ≤ 1e-9. Fixtures are repo-only; the
+//! published crate skips via `parity_fixtures_or_skip!` while a workspace
+//! checkout **hard-fails** on a missing one.
 
 use std::{fs::File, io::BufReader, path::PathBuf};
 

@@ -5,10 +5,12 @@
 //! reproduces pyannote's `q_final`, `sp_final`, and `elbo_trajectory`
 //! within float-cast tolerance.
 //!
-//! **Hard-fails** when fixtures are absent (same convention as
-//! `src/plda/parity_tests.rs`). The fixtures are committed to the
-//! repo and ship via `cargo publish`; a missing one is a packaging
-//! error, not an opt-out.
+//! The fixtures live in the git repo and are excluded from the published
+//! crate tarball, so each test calls `parity_fixtures_or_skip!` first: the
+//! published crate skips cleanly; a workspace checkout runs the suite and
+//! `require_fixtures` **hard-fails** only on a fixture missing from an
+//! otherwise-complete checkout (same convention as
+//! `src/plda/parity_tests.rs`).
 
 use std::{fs::File, io::BufReader, path::PathBuf};
 
@@ -40,9 +42,9 @@ fn require_fixtures() {
   assert!(
     missing.is_empty(),
     "VBx parity fixtures missing: {missing:?}. \
-     These ship with the crate via `cargo publish`; a missing \
-     fixture is a packaging error, not an opt-out. Re-run the \
-     `diarization` repo's \
+     The published crate excludes these and skips earlier; reaching this \
+     assert means a workspace checkout is missing a committed fixture. \
+     Re-run the `diarization` repo's \
      `tests/parity/python/capture_intermediates.py` against the \
      reference clip to regenerate, or restore the files from a \
      full checkout."

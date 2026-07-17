@@ -12,8 +12,9 @@
 //! - `tests/parity/fixtures/01_dialogue/ahc_init_labels.npy` (the
 //!   ground-truth labels after `np.unique(return_inverse=True)`).
 //!
-//! Asserts exact `Vec<usize>` equality. **Hard-fails** on missing
-//! fixtures.
+//! Asserts exact `Vec<usize>` equality. Fixtures are repo-only; the
+//! published crate skips via `parity_fixtures_or_skip!` while a workspace
+//! checkout **hard-fails** on a missing one.
 
 use std::{fs::File, io::BufReader, path::PathBuf};
 

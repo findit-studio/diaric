@@ -3,8 +3,10 @@
 //!
 //! Loads `tests/parity/fixtures/01_dialogue/clustering.npz` and asserts that
 //! running `constrained_argmax` on each captured `soft_clusters[c]` chunk
-//! reproduces the captured `hard_clusters[c]` exactly. **Hard-fails** on
-//! missing fixtures (same convention as `src/plda/parity_tests.rs` and
+//! reproduces the captured `hard_clusters[c]` exactly. Fixtures are
+//! repo-only and excluded from the published crate (which skips via
+//! `parity_fixtures_or_skip!`); a workspace checkout **hard-fails** on a
+//! missing one (same convention as `src/plda/parity_tests.rs` and
 //! `src/vbx/parity_tests.rs`).
 
 use std::{fs::File, io::BufReader, path::PathBuf};
@@ -32,8 +34,9 @@ fn require_fixtures() {
   assert!(
     missing.is_empty(),
     "Hungarian parity fixture missing: {missing:?}. \
-     Ships with the crate via `cargo publish`; a missing fixture is a \
-     packaging error, not an opt-out. Re-run the `diarization` repo's \
+     The published crate excludes these and skips earlier; reaching this \
+     assert means a workspace checkout is missing a committed fixture. \
+     Re-run the `diarization` repo's \
      `tests/parity/python/capture_intermediates.py` to regenerate."
   );
 }
