@@ -1,0 +1,17 @@
+{
+  "pyannote_audio_version": "4.0.4",
+  "numpy_version": "2.4.4",
+  "clip_path": "/private/tmp/dia-bench/capture10/clip_16k.wav",
+  "clip_sha256": "19fb588a4eb1c8f365c6be3345d15ab9e5a4577aaaba107e3112270a2b2f187e",
+  "artifacts": {
+    "raw_embeddings.npz": "ac8bd148f8acd74e47aca7414fe842f3fad21366daa65219e33e306073f631c6",
+    "segmentations.npz": "c5423d23c3e0cc0fa9e8dc310e08afc0dcc0062e1af1e9a2344b55735a8589f4",
+    "plda_embeddings.npz": "95240ff34dd7be87e181dd921fbed98682ae7925a0ef7e68a143d1b06ceed0df",
+    "ahc_init_labels.npy": "5315edd46493af696126dfafb5b44eb6dfebf80b212b5cb2895c84966e0bcddb",
+    "ahc_state.npz": "3f2dec149623a5ef4af8c6e705ad6e0a7eb4aa80aced883b9c9fea4382d30673",
+    "vbx_state.npz": "66634ae0612179dc80d5081ee7c3416aa0bb4d4387a77bf01601dd61beecc35a",
+    "clustering.npz": "b288083b18a3be02f72e7218c1dac537ceeabe4ca5d399fb021b460ed7e3df39",
+    "reconstruction.npz": "2258f9f240c9ebbf9bfa0b64e5ed40ac7b96b4f453a0e0b1986714829af7e9df",
+    "reference.rttm": "e11faa226d4d267d2968b39f2dd3c785fdbea4801e043031a376971613c4d30e"
+  }
+}
