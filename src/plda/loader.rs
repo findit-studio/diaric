@@ -4,7 +4,7 @@
 //! ship as raw little-endian f64 binary blobs under `models/plda/`,
 //! produced by `scripts/extract-plda-blobs.sh` from the upstream
 //! `pyannote/speaker-diarization-community-1` `.npz` files. Embedding
-//! them via `include_bytes!` means the dia binary is self-contained:
+//! them via `include_bytes!` means the `diaric` binary is self-contained:
 //! no runtime file I/O, no `npz` dependency, no
 //! "did you put the weights in the right folder?" support burden.
 

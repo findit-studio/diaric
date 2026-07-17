@@ -31,12 +31,13 @@ reference output.
 
 ## Companion `.bin` files
 
-The six raw little-endian f64 blobs alongside the `.npz` files
-(`mean1.bin`, `mean2.bin`, `lda.bin`, `mu.bin`, `tr.bin`, `psi.bin`)
-are extracted by `scripts/extract-plda-blobs.sh`. They are the actual
-runtime data — `diarization::plda` embeds them via `include_bytes!`, so the
-production Rust path needs no `.npz` reader and no file I/O. Total
-size on disk ~390 KB; binary delta the same.
+The runtime data is a set of raw little-endian f64 blobs alongside the
+`.npz` files. `diaric::plda` (`src/plda/loader.rs`) embeds them via
+`include_bytes!`, so the production Rust path needs no `.npz` reader and
+no file I/O.
+
+Six are extracted from the two `.npz` sources by
+`scripts/extract-plda-blobs.sh`:
 
 | blob | shape | size (bytes) |
 |------|-------|--------------|
@@ -47,19 +48,32 @@ size on disk ~390 KB; binary delta the same.
 | `tr.bin` | (128, 128) row-major | 131 072 |
 | `psi.bin` | (128,) | 1 024 |
 
-The `.npz` files remain checked in — `tests/parity_plda.rs` loads
-them via `npyz` (a dev-only dependency) to cross-check the embedded
-blobs against the upstream-numpy reference.
+Two more are the scipy-derived PLDA eigenvectors, precomputed offline by
+`scripts/extract-plda-eigenvectors.py` (scipy's `eigh` sign convention is
+pinned to remove the LAPACK-version dependency — see the rationale in
+`src/plda/loader.rs`):
+
+| blob | shape | size (bytes) |
+|------|-------|--------------|
+| `eigenvectors_desc.bin` | (128, 128) row-major | 131 072 |
+| `phi_desc.bin` | (128,) | 1 024 |
+
+The `.npz` files remain checked in as the build-time source for the six
+extracted blobs (excluded from the published crate; regenerated via
+`scripts/export-plda-weights.py`). The embedded blobs are cross-checked
+against the captured pyannote reference (`plda_embeddings.npz`) by
+`src/plda/parity_tests.rs`, using the dev-only `npyz` dependency.
 
 ## Refresh
 
 Two-step refresh:
 
-1. Re-run `tests/parity/python/capture_intermediates.py` against any
-   clip under `tests/parity/fixtures/`. The `_export_plda_weights`
-   step re-fetches the HuggingFace snapshot and overwrites the
-   `.npz` files in this directory.
-2. Run `scripts/extract-plda-blobs.sh` to regenerate the six `.bin`
-   files from the new `.npz` files. Re-run `cargo test` to confirm
-   `diarization::plda`'s parity tests still pass against the refreshed
-   captures.
+1. Run `scripts/export-plda-weights.py` (needs `huggingface_hub`) to
+   re-fetch the HuggingFace snapshot and overwrite the `.npz` files in
+   this directory.
+2. Regenerate the `.bin` files from the refreshed `.npz`:
+   `scripts/extract-plda-blobs.sh` (the six whitening blobs) and
+   `scripts/extract-plda-eigenvectors.py` (the two eigenvector blobs).
+   Re-run `cargo test` to confirm `diaric`'s PLDA parity tests
+   (`src/plda/parity_tests.rs`) still pass against the captured
+   references.
