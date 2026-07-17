@@ -32,11 +32,17 @@ pub(crate) mod ops;
 ///
 /// The single numeric primitive `diaric` publishes across the crate
 /// boundary. The WeSpeaker embedding aggregator in the `diarization`
-/// crate sums per-window embeddings into a 256-d accumulator through the
-/// exact SIMD-dispatched kernel the internal algorithm modules use, so
-/// the two crates cannot drift on the aggregation arithmetic. See
-/// [`ops::axpy_f32`](crate::ops::axpy_f32) for the backend-selection and
-/// panic contract.
+/// crate sums per-window embeddings into a 256-d accumulator through this
+/// exact function, so the two crates share one implementation and cannot
+/// drift by re-deriving the aggregation arithmetic.
+///
+/// It is a scalar `f32::mul_add` loop — vectorization is left to the
+/// compiler (build-dependent autovectorization), with no architecture-
+/// specific kernel. It is therefore *distinct* from the SIMD-dispatched
+/// f64 [`ops::axpy`](crate::ops::axpy) that the internal algorithm modules
+/// use (e.g. centroid accumulation). See
+/// [`ops::axpy_f32`](crate::ops::axpy_f32) for the (scalar) implementation
+/// and panic contract.
 pub use ops::axpy_f32;
 
 /// Spill-buffer configuration types reachable from public API surfaces
