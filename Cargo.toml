@@ -71,7 +71,7 @@ serde = ["dep:serde", "dep:humantime-serde"]
 _bench = []
 
 [dependencies]
-mediatime = "0.1"
+mediatime = "0.2"
 thiserror = "2"
 
 # Real-valued FFT for the bit-exact torchaudio.compliance.kaldi.fbank port
