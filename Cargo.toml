@@ -1,6 +1,6 @@
 [package]
 name = "diaric"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
 # `diaric` original source is MIT OR Apache-2.0 (caller's choice). The
@@ -71,7 +71,17 @@ serde = ["dep:serde", "dep:humantime-serde"]
 _bench = []
 
 [dependencies]
-mediatime = "0.1"
+# Public dependency: `SAMPLE_RATE_TB` is a `Timebase`, and `segment`'s
+# `WindowId` / `SpeakerActivity` / `SegmentEvent` hand back `Timestamp`
+# and `TimeRange`, so mediatime's breakage is diaric's breakage.
+#
+# 0.2 signed `Timebase`'s numerator and denominator (`u32`/`NonZeroU32`
+# → `i32`/`NonZeroI32`) to match ffmpeg's `AVRational`. 0.3 replaced the
+# bare-name arithmetic with `checked_`/`saturating_` rungs and corrected
+# the rounding to nearest-with-ties-away-from-zero (`AV_ROUND_NEAR_INF`);
+# diaric constructs timebases and ranges but never rescales, so only the
+# denominator's type reaches this crate.
+mediatime = "0.3"
 thiserror = "2"
 
 # Real-valued FFT for the bit-exact torchaudio.compliance.kaldi.fbank port
