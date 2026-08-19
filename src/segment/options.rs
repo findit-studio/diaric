@@ -1,6 +1,6 @@
 //! Configuration constants and tunables for `crate::segment`.
 
-use core::{num::NonZeroU32, time::Duration};
+use core::{num::NonZeroI32, time::Duration};
 
 use mediatime::Timebase;
 
@@ -12,7 +12,12 @@ pub const SAMPLE_RATE_HZ: u32 = 16_000;
 
 /// `mediatime` timebase for every sample-indexed `Timestamp` and `TimeRange`
 /// emitted by this module: `1 / 16_000` seconds.
-pub const SAMPLE_RATE_TB: Timebase = Timebase::new(1, NonZeroU32::new(SAMPLE_RATE_HZ).unwrap());
+///
+/// The denominator is signed because a [`Timebase`]'s is: ffmpeg's
+/// `AVRational` is a pair of C `int`s. [`SAMPLE_RATE_HZ`] stays `u32` — it
+/// counts samples rather than dividing them.
+pub const SAMPLE_RATE_TB: Timebase =
+  Timebase::new(1, NonZeroI32::new(SAMPLE_RATE_HZ as i32).unwrap());
 
 /// Sample count of one model window — 160 000 samples (10 s at 16 kHz).
 pub const WINDOW_SAMPLES: u32 = 160_000;
@@ -311,7 +316,7 @@ mod tests {
 
   #[test]
   fn sample_rate_tb_matches_constant() {
-    assert_eq!(SAMPLE_RATE_TB.den().get(), SAMPLE_RATE_HZ);
+    assert_eq!(SAMPLE_RATE_TB.den().get(), SAMPLE_RATE_HZ as i32);
     assert_eq!(SAMPLE_RATE_TB.num(), 1);
   }
 
