@@ -86,10 +86,17 @@ pub enum Error {
   /// what a successful normalization carries instead, and the
   /// [module docs](crate::score_norm#accuracy) for why the bound is sound.
   ///
+  /// The bound is the one recovered from the roundings that actually
+  /// happened, so this reports an answer that *is* made of its own
+  /// rounding — never one whose operands merely left room for it to be.
+  /// A trial whose two divisions come out exact is answered however large
+  /// its z-scores are, an exactly cancelling pair included.
+  ///
   /// Reaching this needs a score source spanning ~`1e9` *and* a cohort
   /// deviation at the floor: cosine similarities live in `[-1, 1]` and
   /// PLDA log-likelihood ratios in the tens, so at the default floor the
-  /// widest trial either can construct is still 2147 times short of it.
+  /// widest trial either can construct is still 2147 times short of even
+  /// the cheap filter that precedes it.
   #[error("score_norm: {0}")]
   ZScoreCancellation(ZScoreCancellation),
 
@@ -200,14 +207,16 @@ pub struct ZScoreCancellation {
   z_self: f64,
   z_other: f64,
   normalized: f64,
+  error_bound: f64,
 }
 
 impl ZScoreCancellation {
-  pub(crate) const fn new(z_self: f64, z_other: f64, normalized: f64) -> Self {
+  pub(crate) const fn new(z_self: f64, z_other: f64, normalized: f64, error_bound: f64) -> Self {
     Self {
       z_self,
       z_other,
       normalized,
+      error_bound,
     }
   }
 
@@ -237,8 +246,15 @@ impl ZScoreCancellation {
 
   /// How far [`Self::normalized`] may sit from the exact average of the
   /// two z-scores — the quantity that exceeded [`Self::tolerance`].
-  pub fn error_bound(&self) -> f64 {
-    super::stats::z_score_error_bound(self.z_self, self.z_other)
+  ///
+  /// The **refined** figure, recovered from the roundings that were
+  /// actually made, and not the cheap operand bound that merely selected
+  /// this trial for a closer look. It is the number the guard compared,
+  /// stored rather than recomputed: message and predicate cannot drift
+  /// apart because there is only one of it. See the [module
+  /// docs](crate::score_norm#accuracy) for the two tiers.
+  pub const fn error_bound(&self) -> f64 {
+    self.error_bound
   }
 
   /// The largest error a *successful* normalization carries:

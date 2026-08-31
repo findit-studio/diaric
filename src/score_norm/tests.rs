@@ -1240,6 +1240,32 @@ fn exact_as_norm(raw: f64, a: &CohortStats, b: &CohortStats) -> (i128, i128) {
   (num / g, den / g)
 }
 
+/// `|num/den − value|` as an `f64`, with the cancellation between the two
+/// taken in exact integers before anything is converted.
+///
+/// Everywhere this is used, `value` is what the module returned and
+/// `num/den` is what it should have returned, so the two agree to within
+/// the error being measured. Converting either on its own would round that
+/// error away completely. Only the small quotient that survives the exact
+/// subtraction is converted, which costs two roundings **of the
+/// difference** — a relative `2^-52` against a bound whose own slack is
+/// `2^-50`, so the comparison has room to spare in the direction that
+/// matters.
+fn exact_gap(num: i128, den: i128, value: f64) -> f64 {
+  let (vm, ve) = dyadic(value);
+  assert!(ve.abs() < 120, "2^{ve} does not fit an i128 shift");
+  let shift = |m: i128, k: i32| {
+    m.checked_mul(1i128 << k)
+      .unwrap_or_else(|| panic!("dyadic shift overflows i128"))
+  };
+  let (dn, dd) = if ve >= 0 {
+    (num - shift(vm, ve) * den, den)
+  } else {
+    (shift(num, -ve) - vm * den, shift(den, -ve))
+  };
+  ((dn as f64) / (dd as f64)).abs()
+}
+
 /// Two sides whose z-scores are **adjacent floats of opposite sign** at
 /// `2^50`: their sum is exactly one ulp, so the entire returned value is
 /// a single rounding step of the two divisions — and its sign is not the
@@ -1308,15 +1334,51 @@ fn cancelling_z_scores_are_refused_rather_than_returned_as_rounding_noise() {
     c.error_bound(),
     c.tolerance()
   );
-  // The bound is not marginal here: it is five hundred thousand times the
-  // tolerance, and the true error (0.1925) is a third of the bound.
+
+  // Round 4: the refusal is the *refined* figure's, and the payload
+  // reports the number the predicate actually compared. Recomputing it
+  // from the same function is the anti-drift guard — a `Display` that
+  // formatted anything else would have to disagree with this.
+  let cheap = crate::score_norm::stats::z_score_error_bound(z_e, z_t);
+  let refined =
+    crate::score_norm::stats::refined_error_bound(CANCELLING_RAW, &e, &t, z_e, z_t, cheap);
+  assert_eq!(
+    c.error_bound(),
+    refined,
+    "the payload must report the refined bound, not the cheap one ({cheap:e})"
+  );
+
+  // And the refined figure is the error itself, checked against the exact
+  // rational above rather than against the machinery that produced it.
+  let gap = exact_gap(num, den, 0.125);
   assert!(
-    c.error_bound() > 5e5 * c.tolerance(),
-    "bound {:e} is only {}x the tolerance",
+    gap <= refined,
+    "the refinement must still be a bound: gap {gap:e} exceeds {refined:e}"
+  );
+  assert!(
+    refined <= gap * (1.0 + 1e-14),
+    "and it must be the error, not a bound around it: {refined:e} vs {gap:e}"
+  );
+
+  // Three times tighter than the filter that selected the trial, and
+  // still five orders of magnitude past the tolerance — so the verdict is
+  // exactly the one round 3 reached, reached for a reason that holds.
+  assert!(
+    (2.9..3.1).contains(&(cheap / refined)),
+    "the refinement is {}x tighter, not 3x",
+    cheap / refined
+  );
+  assert!(
+    c.error_bound() > 2.0e5 * c.tolerance() && c.error_bound() < 2.1e5 * c.tolerance(),
+    "bound {:e} is {}x the tolerance",
     c.error_bound(),
     c.error_bound() / c.tolerance()
   );
   assert!(err.to_string().contains("cancel to"), "message: {err}");
+  assert!(
+    err.to_string().contains("1.925e-1"),
+    "the message must carry the refined bound: {err}"
+  );
 }
 
 /// The exact average of the two z-scores, recovered with error-free
@@ -1420,20 +1482,31 @@ fn the_error_bound_really_bounds_the_error() {
   );
 }
 
-/// The property the absolute floor in [`permitted_error`] exists for: a
-/// trial whose two sides cancel **exactly** is still answered, at every
-/// magnitude the guard admits.
+/// The property the absolute floor in [`permitted_error`] exists for, and
+/// the one round 4 had to add to it: a trial whose two sides cancel
+/// **exactly** is answered at *every* magnitude — including the ones the
+/// cheap filter cannot clear.
 ///
 /// Side `a` is centred on zero with `σ = 1`, so its z-score is `raw`;
-/// side `b` is centred on `2·raw`, so its z-score is `-raw`. The average
-/// is exactly `0` — the value a match threshold sits closest to, and the
-/// one a purely relative accuracy criterion would refuse for having no
-/// significant digits left. It has no digits because it is zero.
+/// side `b` is centred on `2·raw`, so its z-score is `-raw`. Both are
+/// exact for as long as `2·raw ± 1` is representable, which reaches
+/// `2^51`. The average is exactly `0` — the value a match threshold sits
+/// closest to, and the one a purely relative accuracy criterion would
+/// refuse for having no significant digits left. It has no digits because
+/// it is zero.
+///
+/// The closing assertion is the dimension the round-3 margin table was
+/// missing. That table measured how far *below* the firing point real
+/// data sits; this measures how far *above* it a result can sit while
+/// still being exactly right. At `2^51` the cheap bound is `2^20` times
+/// the tolerance — a million-fold past the point where round 3 began
+/// refusing — and the answer is still an exact `0`.
 #[test]
-fn an_exactly_cancelling_pair_is_answered_at_every_admissible_magnitude() {
+fn an_exactly_cancelling_pair_is_answered_however_far_above_the_filter() {
   let options = opts(2);
   let mut checked = 0usize;
-  for e in 0i32..=31 {
+  let mut worst_filter_ratio = 0.0f64;
+  for e in 0i32..=51 {
     let raw = pow2(e);
     let a = CohortStats::from_scores([-1.0, 1.0], &options).expect("centred side");
     let b = CohortStats::from_scores([2.0 * raw - 1.0, 2.0 * raw + 1.0], &options)
@@ -1447,37 +1520,119 @@ fn an_exactly_cancelling_pair_is_answered_at_every_admissible_magnitude() {
       0.0,
       "z-scores of +/-2^{e} average to exactly zero"
     );
+    worst_filter_ratio = worst_filter_ratio.max(
+      crate::score_norm::stats::z_score_error_bound(raw, -raw)
+        / crate::score_norm::stats::permitted_error(0.0),
+    );
     checked += 1;
   }
-  assert_eq!(checked, 32, "the sweep must actually run");
+  assert_eq!(checked, 52, "the sweep must actually run");
+  assert_eq!(
+    worst_filter_ratio,
+    pow2(20),
+    "an exact answer must survive a million-fold past the filter's firing point"
+  );
 }
 
-/// The admissible region reaches exactly `2^31`, checked one ulp either
-/// side of it.
+/// Round 4's falsifier. An **exactly correct** result, refused.
+///
+/// The cheap bound is an upper bound, so clearing it proves a result
+/// sound — but exceeding it proves only that the result *might* be
+/// unsound, and the round-3 guard read the second as the first. The
+/// construction above, carried one binade past the point where the cheap
+/// bound overtakes the tolerance, is the counterexample: at `M = 2^32`
+/// both z-scores are exactly `±M`, so their average is exactly `0` with
+/// no arithmetic error whatsoever, and the guard refuses it.
+///
+/// `0` is the most threshold-relevant value this module produces, which
+/// is the whole reason [`permitted_error`] carries an absolute floor —
+/// and the floor did not save this one, because the predicate never asked
+/// what the error *was*.
+#[test]
+fn an_exactly_cancelling_pair_above_the_cheap_bound_is_still_answered() {
+  let options = opts(2);
+  let m = pow2(32);
+  let a = CohortStats::from_scores([-1.0, 1.0], &options).expect("centred side");
+  let b = CohortStats::from_scores([2.0 * m - 1.0, 2.0 * m + 1.0], &options)
+    .expect("side centred on 2*M");
+  assert_eq!(a.mean(), 0.0, "mu_a");
+  assert_eq!(a.deviation(), 1.0, "sigma_a");
+  assert_eq!(b.mean(), 2.0 * m, "mu_b");
+  assert_eq!(b.deviation(), 1.0, "sigma_b");
+
+  // Both z-scores are exact: the shift is a difference of two powers of
+  // two and the divisor is one, so neither operation rounds.
+  let z_a = (m - a.mean()) / a.deviation();
+  let z_b = (m - b.mean()) / b.deviation();
+  assert_eq!(z_a, m, "z_a is exactly M");
+  assert_eq!(z_b, -m, "z_b is exactly -M");
+  assert_eq!(z_a + z_b, 0.0, "the exact average is exactly zero");
+
+  // The cheap bound does fire — 2^-19 against a tolerance of 2^-20 — so
+  // this is the tier-2 path and not an accident of the tier-1 predicate.
+  let cheap = crate::score_norm::stats::z_score_error_bound(z_a, z_b);
+  let tolerance = crate::score_norm::stats::permitted_error(0.0);
+  assert_eq!(cheap, pow2(-19), "the cheap bound at mag 2^32");
+  assert_eq!(tolerance, MAX_NORMALIZED_ERROR, "the absolute floor");
+  assert!(
+    cheap > tolerance,
+    "the cheap filter must fire, or nothing is proved"
+  );
+
+  // The second tier finds nothing to charge it for. What is left is the
+  // floor beneath the refinement and nothing else: `RESIDUAL_UNDERFLOW`
+  // divided by each side's `σ`, which is `1` on both, averaged.
+  assert_eq!(
+    crate::score_norm::stats::refined_error_bound(m, &a, &b, z_a, z_b, cheap),
+    f64::MIN_POSITIVE * f64::EPSILON,
+    "every residual here is zero, so only the underflow floor survives"
+  );
+
+  assert_eq!(
+    as_norm(m, &a, &b).unwrap_or_else(|err| panic!("refused an exact zero: {err}")),
+    0.0,
+    "an exactly computed zero is an answer, not a cancellation"
+  );
+}
+
+/// The **filter's** boundary is exactly `2^31`, checked one ulp either
+/// side of it — and crossing it decides nothing on its own.
 ///
 /// With the construction above the two z-scores are `±raw`, so
-/// `mag == raw` and the bound is `2^-51 · raw` against a tolerance of
-/// `MAX_NORMALIZED_ERROR`. At `raw = 2^31` the two are equal and the
-/// trial is answered; one ulp higher the bound wins. This is the
+/// `mag == raw` and the cheap bound is `2^-51 · raw` against a tolerance
+/// of `MAX_NORMALIZED_ERROR`. At `raw = 2^31` the two are exactly equal
+/// and the filter does not fire; one ulp higher it does. That is the
 /// predicate's boundary rather than its middle, so a `>` quietly becoming
 /// a `>=` has somewhere to fail.
+///
+/// What round 4 changed is what happens on the far side. Firing hands the
+/// trial to the second tier, which finds no error to refuse it for, so
+/// **both** magnitudes are answered and with the same exact `0`. Round 3
+/// returned `false` for the second row: that was the defect, and this is
+/// the row that pins its absence.
 #[test]
-fn the_admissible_z_magnitude_is_exactly_two_to_the_thirty_first() {
+fn the_cheap_filter_fires_exactly_above_two_to_the_thirty_first() {
   let options = opts(2);
   let a = CohortStats::from_scores([-1.0, 1.0], &options).expect("centred side");
   let admissible = pow2(31);
   let over = admissible + pow2(-21); // one ulp at 2^31
 
-  for (raw, answered) in [(admissible, true), (over, false)] {
+  for (raw, fires) in [(admissible, false), (over, true)] {
     let b = CohortStats::from_scores([2.0 * raw - 1.0, 2.0 * raw + 1.0], &options)
       .expect("side centred on 2*raw");
     assert_eq!(b.mean(), 2.0 * raw, "mu_b");
     assert_eq!(b.deviation(), 1.0, "sigma_b");
     assert_eq!(
-      as_norm(raw, &a, &b).is_ok(),
-      answered,
-      "raw {raw:e} should {} be answered",
-      if answered { "" } else { "not" }
+      crate::score_norm::stats::z_score_error_bound(raw, -raw)
+        > crate::score_norm::stats::permitted_error(0.0),
+      fires,
+      "raw {raw:e} should {} fire the filter",
+      if fires { "" } else { "not" }
+    );
+    assert_eq!(
+      as_norm(raw, &a, &b).unwrap_or_else(|err| panic!("refused {raw:e}: {err}")),
+      0.0,
+      "the filter is not the verdict: raw {raw:e} is answered either way"
     );
   }
   assert_eq!(
@@ -1601,4 +1756,151 @@ fn the_guard_stays_orders_of_magnitude_clear_of_every_measured_regime() {
     worst < 1e-3,
     "the widest cosine trial the default floor admits reaches {worst:e} of the guard"
   );
+}
+/// What the second tier buys, measured rather than described: how much
+/// tighter the recovered error is than the operand bound that would send
+/// a trial to it.
+///
+/// Both figures are computed for every case over the same cosine regimes
+/// the margin table uses. The second tier is never *reached* there — that
+/// is the first tier's whole job — but the comparison is what says the
+/// fallback would be worth having if it were, and it is the number the
+/// module docs quote.
+///
+/// The ratio can never fall below one: [`refined_error_bound`] closes with
+/// a `min` against the bound that selected the trial, so the two-tier
+/// predicate cannot refuse anything the one-tier predicate answered.
+/// Measured worst-case minimum across these regimes is `1.7`, median `8.8`
+/// to `9.6`; the pins sit well inside that so a NEON-versus-scalar
+/// difference in the cohort statistics cannot flake the test.
+#[test]
+fn the_refinement_is_measurably_tighter_than_the_filter_that_selects_it() {
+  let options = opts(8).with_min_deviation(1e-15);
+  let mut next = uniform_stream(0x9E37_79B9_7F4A_7C15);
+  for spread in [1e-9f64, 1e-6, 1e-3, 1e-1, 5e-1] {
+    let mut ratios = Vec::new();
+    for _ in 0..400 {
+      let base_e = next() * 0.5;
+      let e: Vec<f64> = (0..8).map(|_| base_e + spread * next()).collect();
+      let base_t = next() * 0.5;
+      let t: Vec<f64> = (0..8).map(|_| base_t + spread * next()).collect();
+      let raw = next();
+      let (Ok(a), Ok(b)) = (
+        CohortStats::from_scores(e, &options),
+        CohortStats::from_scores(t, &options),
+      ) else {
+        continue;
+      };
+      let z_a = (raw - a.mean()) / a.deviation();
+      let z_b = (raw - b.mean()) / b.deviation();
+      let cheap = crate::score_norm::stats::z_score_error_bound(z_a, z_b);
+      let refined = crate::score_norm::stats::refined_error_bound(raw, &a, &b, z_a, z_b, cheap);
+      assert!(
+        refined > 0.0 && refined <= cheap,
+        "refined {refined:e} is not a tightening of {cheap:e}"
+      );
+      ratios.push(cheap / refined);
+    }
+    assert!(
+      ratios.len() > 350,
+      "spread {spread:e} produced {}",
+      ratios.len()
+    );
+    ratios.sort_by(f64::total_cmp);
+    let median = ratios[ratios.len() / 2];
+    assert!(
+      ratios[0] > 1.5,
+      "spread {spread:e}: the refinement is only {}x tighter at worst",
+      ratios[0]
+    );
+    assert!(
+      median > 5.0,
+      "spread {spread:e}: the refinement is only {median}x tighter at the median"
+    );
+  }
+}
+
+/// The second tier on the shift's **rescaled** branch, where the numerator
+/// it has to recover is not the one `raw − μ` produced.
+///
+/// `μ_a = -2^1023` against `raw = 2^1023` overflows the shift, so
+/// [`CohortStats::z_score`] takes the halved form — and a two-sum over
+/// `raw` and `-μ_a` would recover the residual of an infinity. `ZTerms`
+/// carries the halved operands instead, which are exact here because both
+/// are large normals.
+///
+/// Every quantity is a power of two, so both z-scores are exactly
+/// `±2^34` and the exact average is exactly `0`. The cheap bound is eight
+/// times the tolerance, so the trial does reach the second tier; the
+/// second tier finds no residual at all and answers it.
+#[test]
+fn the_refinement_recovers_the_rescaled_branchs_residuals() {
+  let options = AsNormOptions::new();
+  let a = CohortStats::from_scores([-pow2(1023) - pow2(990), -pow2(1023) + pow2(990)], &options)
+    .expect("a side centred on -2^1023");
+  let mu_b = pow2(1023) + pow2(1022); // 1.5 * 2^1023
+  let b = CohortStats::from_scores([mu_b - pow2(988), mu_b + pow2(988)], &options)
+    .expect("a side centred on 1.5 * 2^1023");
+  assert_eq!(a.mean(), -pow2(1023), "mu_a");
+  assert_eq!(a.deviation(), pow2(990), "sigma_a");
+  assert_eq!(b.mean(), mu_b, "mu_b");
+  assert_eq!(b.deviation(), pow2(988), "sigma_b");
+
+  let raw = pow2(1023);
+  assert!(
+    !(raw - a.mean()).is_finite(),
+    "side a must take the rescaled branch, or the test proves nothing"
+  );
+  let z_a = (0.5 * raw - 0.5 * a.mean()) / (0.5 * a.deviation());
+  let z_b = (raw - b.mean()) / b.deviation();
+  assert_eq!(z_a, pow2(34), "z_a is exactly 2^34");
+  assert_eq!(z_b, -pow2(34), "z_b is exactly -2^34");
+
+  let cheap = crate::score_norm::stats::z_score_error_bound(z_a, z_b);
+  assert_eq!(
+    cheap / crate::score_norm::stats::permitted_error(0.0),
+    8.0,
+    "the filter must fire, or the second tier is not exercised"
+  );
+  assert_eq!(
+    crate::score_norm::stats::refined_error_bound(raw, &a, &b, z_a, z_b, cheap),
+    0.0,
+    "the halved operands are exact, so there is no residual to find"
+  );
+  assert_eq!(
+    as_norm(raw, &a, &b).unwrap_or_else(|err| panic!("refused an exact zero: {err}")),
+    0.0
+  );
+}
+
+/// Where the two z-scores' *sum* overflows, the two-sum the refinement
+/// needs cannot be taken — and the refinement says so by falling back to
+/// the bound that selected it, rather than by deciding a comparison
+/// against a `NaN`.
+///
+/// The predicate cannot reach this: an overflowing sum needs two
+/// same-signed terms, which cancel by nothing, so the first tier clears
+/// them by `2^-31` and never asks. Asserted directly all the same, because
+/// "unreachable" is a property of today's first tier and not of this
+/// function — and because a `NaN` here would compare `false` against the
+/// tolerance and *accept*, which is the one direction a guard must not
+/// fail in.
+#[test]
+fn a_refinement_that_cannot_be_taken_falls_back_to_the_filter() {
+  let options = opts(2).with_min_deviation(1e-101);
+  let side = CohortStats::from_scores([-1e-100, 1e-100], &options).expect("usable side");
+  let raw = 1e208;
+  let z = (raw - side.mean()) / side.deviation();
+  assert_eq!(z, 1e308, "each side standardizes to 1e308");
+  assert!(!(z + z).is_finite(), "and their sum overflows");
+
+  let cheap = crate::score_norm::stats::z_score_error_bound(z, z);
+  let refined = crate::score_norm::stats::refined_error_bound(raw, &side, &side, z, z, cheap);
+  assert_eq!(refined, cheap, "an untakeable refinement refines nothing");
+  assert!(refined.is_finite(), "and it is never a NaN: {refined}");
+  assert!(
+    cheap < crate::score_norm::stats::permitted_error(1e308),
+    "the filter clears this regime anyway, by 2^-31"
+  );
+  assert_eq!(as_norm(raw, &side, &side).expect("answered"), 1e308);
 }

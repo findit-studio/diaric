@@ -218,29 +218,72 @@
 //! finiteness:
 //!
 //! ```text
-//! refuse when   2^-51 · mag   >   MAX_NORMALIZED_ERROR · max(|G|, 1)
+//! |returned − exact| ≤ MAX_NORMALIZED_ERROR · max(|returned|, 1)
 //! ```
 //!
-//! Two properties make this a guard rather than a heuristic. It is a
-//! **bound**, so it never refuses a result that was in fact sound; and its
-//! tolerance has an **absolute floor of one standard deviation**, so the
-//! predicate reduces to `mag > 2^31` whenever the answer is small. That is
-//! a statement about the inputs and not about how badly they cancelled:
-//! every trial whose z-scores average below `2^31 ≈ 2.1e9` is answered,
-//! however completely the two sides cancel, an exactly zero result
-//! included. A purely relative criterion would have refused exactly those
-//! — the near-zero results a match threshold lives among.
+//! The tolerance has an **absolute floor of one standard deviation**, and
+//! that is the load-bearing half. A purely relative criterion would refuse
+//! every result that legitimately cancels to near zero — precisely the
+//! near-zero results a match threshold lives among, and precisely where a
+//! z-score's own absolute error is most obviously harmless.
 //!
 //! Nothing here alters a returned value: the guard only decides whether
 //! the value is returned, so every answer this module gave before it is
 //! bit-identical to the one it gives now.
 //!
+//! ## An upper bound cannot convict
+//!
+//! `2^-51 · mag` settles exactly one of the two questions. Under the
+//! tolerance it proves the answer sound. Over it, it proves nothing: it is
+//! the error the operands *permit*, not the error they *made*, and a trial
+//! whose subtractions and divisions come out exact made none of it.
+//!
+//! The smallest counterexample needs no cancellation analysis at all. One
+//! side drawn from `[-1, 1]` and one from `[2M-1, 2M+1]` give `μ = 0, σ =
+//! 1` and `μ = 2M, σ = 1`, both exact; at `raw = M = 2^32` the two
+//! z-scores are exactly `±2^32` and their average is an exact `0` carrying
+//! no arithmetic error whatsoever. `mag` is `2^32`, so the bound is
+//! `2^-19` against a tolerance of `2^-20` — and a criterion that reads the
+//! bound as a verdict throws the answer away. Zero is the value a match
+//! threshold sits closest to; refusing an exact one is worse than the
+//! defect the guard was added for.
+//!
+//! So the bound **filters**, and a second quantity decides:
+//!
+//! | tier | quantity | reached |
+//! |---|---|---|
+//! | 1 | `2^-51 · mag`, from the operands | every trial |
+//! | 2 | `½(s + c₁ + c₂)`, from the residuals | only when tier 1 cannot clear it |
+//!
+//! Tier two is an **identity**, not an inequality. `f64::mul_add` returns
+//! `d − q·σ` exactly and Knuth's two-sum returns the subtraction's
+//! residual exactly, so each z-score's exact correction `cᵢ = zᵢ − qᵢ` is
+//! recoverable; with `s` the residual of `q₁ + q₂`,
+//!
+//! ```text
+//! A − G  =  ½(s + c₁ + c₂) − δ,        |δ| ≤ 2^-1075
+//! ```
+//!
+//! `δ` being the halving's own rounding, zero unless the sum lands among
+//! the subnormals. The three residuals are summed **signed** — summing
+//! their absolute values would be sound and would repeat tier one's
+//! mistake one level down, charging a trial whose error terms cancel for
+//! an error it does not have. What is refused is therefore an average that
+//! really is made of its own rounding, never one whose operands merely
+//! left room for it to be.
+//!
+//! The common path is unchanged: tier one is the same single comparison it
+//! always was, and no score source here reaches tier two. That the
+//! residual machinery costs a software `fma` on targets without a hardware
+//! one is why it is not the primary mechanism — and no reason at all
+//! against a fallback.
+//!
 //! ## How far the guard is from real data
 //!
 //! A guard that fires on real scores would be worse than the defect it
-//! prevents, so the distance is measured rather than asserted. Each row
-//! is the worst `error bound / tolerance` over the regimes this module
-//! has been measured on — `1.0` is where it fires:
+//! prevents, so the distance is measured rather than asserted. Each row is
+//! the worst `tier-1 bound / tolerance` over the regimes this module has
+//! been measured on — `1.0` is where tier two is consulted:
 //!
 //! | regime | worst ratio | margin |
 //! |---|---|---|
@@ -255,29 +298,69 @@
 //! symmetrically about the trial score, so the z-scores are as large as
 //! `[-1, 1]` allows and the cancellation is total. It is the closest any
 //! bounded score source gets, and it is still three orders of magnitude
-//! away. The case that does fire — z-scores near `2^50` one ulp apart —
-//! exceeds the tolerance by `6.05e5×`, so the two regimes are separated
-//! by nine orders of magnitude with nothing in between that a caller can
-//! construct. `the_guard_stays_orders_of_magnitude_clear_of_every_measured_regime`
+//! away. `the_guard_stays_orders_of_magnitude_clear_of_every_measured_regime`
 //! pins every row.
 //!
-//! ## Why the residuals are not recovered instead
+//! That table measures one direction only — how far *below* the firing
+//! point real data sits — and a table that measures only that cannot show
+//! that some inputs *above* it are exactly correct. The other direction:
 //!
-//! They could be. `f64::mul_add` yields `d − q·σ` exactly, a two-sum
-//! yields the subtraction's residual, and adding both back would make the
-//! cancelling case correct rather than refused. It is deliberately not
-//! done. The machinery pays only in a regime no score source here can
-//! reach — the cancellation needs `|raw − μ| ≥ 1.1e9` at a deviation on
-//! the floor, while cosine similarities span `[-1, 1]` and PLDA
-//! log-likelihood ratios the tens — and `mul_add` is a software `fma`
-//! call on every target without a hardware one, on a function called once
-//! per trial. What it would buy is measured too: the residual bound is a
-//! median 3.5 times tighter than the one above across the cosine sweeps
-//! and 3.0 times tighter on the case that does fire, where the two exceed
-//! the tolerance by `2.0e5×` and `6.1e5×` respectively. Three times
-//! tighter never moves a verdict when the nearest real data is a million
-//! times away. Refusing is also what the rest of this module does with an
-//! answer it cannot stand behind.
+//! | | ratio to the tolerance | verdict |
+//! |---|---|---|
+//! | exactly cancelling pair at `2^31` | `1.0` | answered, tier 1 |
+//! | the same at `2^32` | `2.0` | answered, tier 2 |
+//! | the same at `2^51` | `1.05e6` | answered, tier 2 |
+//! | adjacent-ulp z-scores at `2^50` | `6.05e5` | **refused** |
+//!
+//! There is no ceiling in the first column: an exact cancellation is
+//! answered a millionfold past the firing point, and the case that is
+//! refused sits *among* those magnitudes rather than beyond them. That is
+//! the separation tier one could not make and tier two does — for the
+//! refused row tier two reports `1.93e-1`, three times tighter than tier
+//! one's `5.77e-1` and equal, to within its own `2^-50` slack, to the true
+//! error of that answer.
+//! `an_exactly_cancelling_pair_is_answered_however_far_above_the_filter`
+//! and `cancelling_z_scores_are_refused_rather_than_returned_as_rounding_noise`
+//! pin the two ends.
+//!
+//! ## What tier two still does not measure
+//!
+//! `exact` above is the exact average of the two z-scores **the stored
+//! statistics define** — nothing more. `μ` and `σ` are themselves sample
+//! statistics over [`CohortStats::selected`] scores, and `μ` alone carries
+//! a standard error of `σ/√N`, which is `0.058` standard deviations at the
+//! recommended `top_n` of 300. The arithmetic this guard certifies is some
+//! 60 000 times sharper than the statistics being certified. Acceptance
+//! means the module computed the right function of its inputs, never that
+//! the inputs describe the speaker well.
+//!
+//! ## Where the two-tier predicate can still be wrong
+//!
+//! Named rather than left to be found, since round 4 was a flaw in round
+//! 3's *reasoning* and not in its arithmetic.
+//!
+//! - **Soundness rests entirely on tier one.** Tier two only ever
+//!   relaxes: it is consulted after tier one fires and its `min` keeps it
+//!   from exceeding what fired. So the property that no inaccurate answer
+//!   escapes is still the property that `2^-51 · mag` is a true upper
+//!   bound, and nothing below it double-checks that.
+//! - **An untakeable refinement reverts to round 3's verdict.** Where the
+//!   two-sum cannot be taken — an overflowing sum of z-scores, or the
+//!   extreme corner where Knuth's intermediates leave the range — the
+//!   `min` falls back to tier one, false refusals included. Both need two
+//!   same-signed z-scores that cancel by nothing, which tier one clears by
+//!   `2^-31` and never selects; the fallback exists so that a `NaN` cannot
+//!   compare `false` and *accept*, which is the direction that would
+//!   matter.
+//! - **A `σ` deep in the subnormals cannot be certified at all.** The
+//!   `mul_add` residual is exactly representable only while it stays
+//!   normal, and the correction divides by `σ`, so below roughly
+//!   `σ = 2^-1054` that single rounding outgrows the tolerance and tier
+//!   two refuses on the floor alone. That is an honest "cannot certify"
+//!   rather than a "might be wrong" — but it is a refusal a correct answer
+//!   can attract, and reaching it needs an
+//!   [`AsNormOptions::min_deviation`] some thousand binades under the
+//!   default.
 //!
 //! # Not implemented
 //!

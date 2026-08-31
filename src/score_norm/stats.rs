@@ -326,9 +326,19 @@ impl CohortStats {
   ///
   /// where `exact` is the exact average of the two z-scores the stored
   /// statistics define. Anything looser is [`Error::ZScoreCancellation`].
-  /// See the [module docs](crate::score_norm#accuracy) for why the bound
-  /// is a bound and not an estimate; nothing here changes a value, so
-  /// every answer this returns is the one it always returned.
+  /// Nothing here changes a value, so every answer this returns is the one
+  /// it always returned.
+  ///
+  /// The test is in two tiers, and only the first is on the common path.
+  /// [`z_score_error_bound`] costs one comparison and asks what the
+  /// operands *permit*; clearing it settles the question, and every trial
+  /// any score source here produces clears it. Exceeding it settles
+  /// nothing — a trial whose two divisions come out exact permits an error
+  /// it did not make — so those trials go to [`refined_error_bound`],
+  /// which recovers the roundings that actually happened and refuses only
+  /// what they convict. See the [module docs](crate::score_norm#accuracy)
+  /// for the identity behind the second tier and the measured separation
+  /// between the two regimes.
   ///
   /// # Errors
   ///
@@ -341,9 +351,10 @@ impl CohortStats {
   ///   absolute threshold needs: `inf` clears every threshold, so an
   ///   `Ok(inf)` would be an unconditional match.
   /// - [`Error::ZScoreCancellation`] — the two z-scores cancel past the
-  ///   accuracy above. At the default deviation floor no bounded score
-  ///   source reaches it: a cosine similarity or a PLDA log-likelihood
-  ///   ratio falls short by three orders of magnitude.
+  ///   accuracy above, as their own recovered residuals confirm. At the
+  ///   default deviation floor no bounded score source reaches even the
+  ///   first tier: a cosine similarity or a PLDA log-likelihood ratio
+  ///   falls short by three orders of magnitude.
   pub fn normalize(&self, raw: f64, other: &CohortStats) -> Result<f64, Error> {
     if !raw.is_finite() {
       return Err(Error::NonFiniteScore(raw));
@@ -354,10 +365,25 @@ impl CohortStats {
     if !normalized.is_finite() {
       return Err(Error::NonFiniteResult(normalized));
     }
-    if z_score_error_bound(z_self, z_other) > permitted_error(normalized) {
-      return Err(Error::ZScoreCancellation(ZScoreCancellation::new(
-        z_self, z_other, normalized,
-      )));
+    let tolerance = permitted_error(normalized);
+    // Tier one is a filter, not a verdict. `z_score_error_bound` is an
+    // *upper* bound, so clearing it proves the answer sound — but
+    // exceeding it proves only that the answer *might* be unsound, which
+    // is a reason to look closer and not a reason to refuse. Every trial
+    // any score source here produces clears it, and clearing it costs the
+    // one comparison it always cost.
+    let filtered = z_score_error_bound(z_self, z_other);
+    if filtered > tolerance {
+      // Tier two, reached only by the trials tier one could not clear.
+      // The residuals turn the bound into the error itself, so what is
+      // refused here is an answer that really is made of its own
+      // rounding rather than one whose operands merely allow it to be.
+      let refined = refined_error_bound(raw, self, other, z_self, z_other, filtered);
+      if refined > tolerance {
+        return Err(Error::ZScoreCancellation(ZScoreCancellation::new(
+          z_self, z_other, normalized, refined,
+        )));
+      }
     }
     Ok(normalized)
   }
@@ -383,12 +409,100 @@ impl CohortStats {
   /// an infinity that [`Self::normalize`] refuses, which is the correct
   /// outcome however precisely the divisor was formed.
   fn z_score(&self, raw: f64) -> f64 {
+    self.z_terms(raw).quotient()
+  }
+
+  /// The operands [`Self::z_score`] rounds, kept apart so the roundings
+  /// can be recovered afterwards.
+  ///
+  /// The branch is the one above and the arithmetic is the same
+  /// arithmetic — `a - b` and `a + (-b)` round identically — so
+  /// [`ZTerms::quotient`] returns `z_score`'s value bit for bit. What the
+  /// split adds is that `minuend` and `subtrahend` are *exact*: the
+  /// rescaled branch's halvings land on large normals, so both are exact
+  /// there too, and a two-sum over the pair therefore recovers the
+  /// subtraction's residual rather than a residual of an already-rounded
+  /// shift.
+  fn z_terms(&self, raw: f64) -> ZTerms {
     let shift = raw - self.mean;
     if shift.is_finite() {
-      return shift / self.deviation;
+      return ZTerms {
+        shift,
+        minuend: raw,
+        subtrahend: -self.mean,
+        deviation: self.deviation,
+      };
     }
-    (0.5 * raw - 0.5 * self.mean) / (0.5 * self.deviation)
+    let (minuend, subtrahend) = (0.5 * raw, -(0.5 * self.mean));
+    ZTerms {
+      shift: minuend + subtrahend,
+      minuend,
+      subtrahend,
+      deviation: 0.5 * self.deviation,
+    }
   }
+}
+
+/// One side's z-score as the exact operands behind it: the quotient is
+/// `(minuend + subtrahend) / deviation`, and every field is a float that
+/// carries no error of its own.
+///
+/// [`CohortStats::z_score`] rounds twice — once forming `shift`, once
+/// dividing — and the whole of [`refined_error_bound`] is recovering
+/// those two roundings. Neither is recoverable from `shift` alone, which
+/// is why the pair that produced it travels with it.
+#[derive(Debug, Clone, Copy)]
+struct ZTerms {
+  /// `fl(minuend + subtrahend)` — the rounded numerator.
+  shift: f64,
+  /// The trial score, halved on the rescaled branch.
+  minuend: f64,
+  /// The negated cohort mean, halved on the rescaled branch.
+  subtrahend: f64,
+  /// The cohort deviation, halved on the rescaled branch.
+  deviation: f64,
+}
+
+impl ZTerms {
+  /// The rounded quotient — [`CohortStats::z_score`]'s value.
+  fn quotient(self) -> f64 {
+    self.shift / self.deviation
+  }
+
+  /// `z − q`: everything the two roundings threw away, for the `q` this
+  /// side produced.
+  ///
+  /// Both residuals are recovered **exactly**. Knuth's two-sum gives
+  /// `(minuend + subtrahend) − shift`, and `mul_add` gives
+  /// `shift − q·σ` — the classical result that a division's residual is
+  /// representable, so the fused form rounds nothing. The exact quotient
+  /// is then `q + (r + ρ)/σ`, and this returns the second term.
+  ///
+  /// Also returned is the floor beneath it: the one underflow in the
+  /// refinement that does not stay negligible, since it is the one that
+  /// gets divided by `σ`. See [`RESIDUAL_UNDERFLOW`].
+  fn correction(self, quotient: f64) -> (f64, f64) {
+    let shift_residual = two_sum_residual(self.minuend, self.subtrahend);
+    let quotient_residual = (-quotient).mul_add(self.deviation, self.shift);
+    (
+      (shift_residual + quotient_residual) / self.deviation,
+      RESIDUAL_UNDERFLOW / self.deviation,
+    )
+  }
+}
+
+/// Knuth's two-sum residual: the part of `a + b` that `fl(a + b)` could
+/// not keep.
+///
+/// `a + b == fl(a + b) + two_sum_residual(a, b)` exactly, for finite
+/// operands whose sum is finite — including through gradual underflow,
+/// and with no ordering requirement on the two magnitudes. Where the sum
+/// is *not* finite the intermediates below produce a `NaN`, which
+/// [`refined_error_bound`] turns back into the bound that selected it.
+fn two_sum_residual(a: f64, b: f64) -> f64 {
+  let sum = a + b;
+  let b_part = sum - a;
+  (a - (sum - b_part)) + (b - b_part)
 }
 
 /// The average of two standardized scores — AS-Norm1's `1/2`.
@@ -443,17 +557,18 @@ fn half_sum(a: f64, b: f64) -> f64 {
 ///   statistical one. Tightening it would buy nothing a caller could
 ///   measure and would start refusing answers whose real uncertainty is
 ///   somewhere else entirely.
-/// - **It leaves the reachable range alone.** The error bound is `2^-51`
-///   per unit of z-score magnitude, so this tolerance answers *every*
-///   trial whose two z-scores average below `2^31 ≈ 2.1e9`, however
-///   completely they cancel — an exactly zero result included. Cosine
-///   similarities span `[-1, 1]`, so at the
+/// - **It leaves the reachable range alone.** The first tier's bound is
+///   `2^-51` per unit of z-score magnitude, so this tolerance answers
+///   *every* trial whose two z-scores average below `2^31 ≈ 2.1e9`
+///   outright, however completely they cancel — an exactly zero result
+///   included — and answers the ones above it whenever their residuals
+///   say the answer is real. Cosine similarities span `[-1, 1]`, so at the
 ///   [`DEFAULT_MIN_DEVIATION`](crate::score_norm::DEFAULT_MIN_DEVIATION)
 ///   floor they cannot standardize past `2e6`: two thousandfold clear of
-///   the guard in the widest trial that floor admits at all, and six to
-///   nine orders of magnitude clear at any realistic cohort spread. The
-///   [module docs](crate::score_norm#accuracy) carry the measured
-///   figures.
+///   even the first tier in the widest trial that floor admits at all, and
+///   six to nine orders of magnitude clear at any realistic cohort spread.
+///   The [module docs](crate::score_norm#accuracy) carry the measured
+///   figures in both directions.
 pub const MAX_NORMALIZED_ERROR: f64 = 1.0 / (1u64 << 20) as f64;
 
 /// Bound on the relative error a single z-score is carried with.
@@ -467,13 +582,18 @@ pub const MAX_NORMALIZED_ERROR: f64 = 1.0 / (1u64 << 20) as f64;
 const Z_SCORE_RELATIVE_ERROR: f64 = 2.0 * f64::EPSILON;
 
 /// How far [`CohortStats::normalize`]'s returned value can sit from the
-/// exact average of the two z-scores it stands for.
+/// exact average of the two z-scores it stands for, from the **operands
+/// alone** — the guard's first tier.
 ///
 /// A bound, not an estimate — see the [module
 /// docs](crate::score_norm#accuracy). It is worth being explicit about
 /// what it does *not* depend on: not on how badly the two sides cancelled,
-/// and not on the returned value at all. Cancellation is what makes the
-/// bound matter, never what makes it larger.
+/// not on the returned value, and **not on whether the roundings it
+/// budgets for actually happened**. That last one is why it can only
+/// filter. It answers "how wrong could this be", so clearing it settles
+/// the question; exceeding it does not, because a trial whose two
+/// divisions are exact carries none of the error this charges it for.
+/// [`refined_error_bound`] is what settles the other direction.
 pub(super) fn z_score_error_bound(z_self: f64, z_other: f64) -> f64 {
   // `(|a| + |b|) / 2`, halved term by term. The average of two z-scores
   // can be representable where their sum is not — that is the case
@@ -482,6 +602,113 @@ pub(super) fn z_score_error_bound(z_self: f64, z_other: f64) -> f64 {
   // round, and cannot matter: a magnitude that small is `2^-1021` away
   // from a tolerance whose floor is `MAX_NORMALIZED_ERROR`.
   Z_SCORE_RELATIVE_ERROR * (0.5 * z_self.abs() + 0.5 * z_other.abs())
+}
+
+/// Slack on the refined figure, covering the six roundings that combine
+/// the recovered residuals into it.
+///
+/// `2^-50`, eight times `u = 2^-53`, against a needed `4.01`. Writing
+/// `Σ = |s| + |c₁| + |c₂|` for the quantity this multiplies (before the
+/// halving both it and the figure share):
+///
+/// - each side's correction costs an addition and a division, both
+///   relative to that side's own `|cᵢ|`, so the two sides together
+///   contribute at most `2.01u(|c₁| + |c₂|)`;
+/// - the two additions that sum the three residuals are relative to
+///   partial sums no larger than `Σ`, contributing at most `2uΣ`.
+///
+/// `4.01uΣ` in total, and the halving is exact. The near-doubling to `8u`
+/// leaves the same room for second-order terms that
+/// [`Z_SCORE_RELATIVE_ERROR`]'s doubling does, and it is what keeps the
+/// figure above the error even when `Σ` is itself computed a rounding
+/// low.
+const REFINED_RESIDUAL_SLACK: f64 = 4.0 * f64::EPSILON;
+
+/// The largest absolute error `mul_add` can leave in a division residual
+/// it cannot represent: the smallest positive subnormal, `2^-1074`.
+///
+/// `shift − q·σ` is exactly representable *while it stays normal*, which
+/// is the classical result [`ZTerms::correction`] rests on. Below that the
+/// fused multiply-add still rounds only once — but into the subnormals,
+/// and the correction then divides by `σ`, which is what stops this being
+/// one more `η` to wave at. Carried explicitly instead: it contributes
+/// `2^-1054` at [`DEFAULT_MIN_DEVIATION`](crate::score_norm::DEFAULT_MIN_DEVIATION),
+/// and `1` for a `σ` at the very bottom of the range — where it refuses,
+/// correctly, because nothing about such a trial can be certified.
+///
+/// Every other underflow in the refinement stays where it is made: the
+/// two-sum is exact through gradual underflow, adding two subnormals is
+/// exact, and a quotient or a halving that lands among them is off by at
+/// most `2^-1075` *absolutely* — some thousand binades below the
+/// tolerance's own floor of `2^-20`.
+const RESIDUAL_UNDERFLOW: f64 = f64::MIN_POSITIVE * f64::EPSILON;
+
+/// The error [`CohortStats::normalize`] **actually** carries — the
+/// guard's second tier, and the one that decides.
+///
+/// [`z_score_error_bound`] charges each z-score for two roundings it may
+/// not have made. This recovers them instead. Writing `q₁, q₂` for the
+/// computed z-scores, `c₁, c₂` for their exact corrections
+/// ([`ZTerms::correction`]) and `s` for the residual of `q₁ + q₂`, the
+/// exact average `A` and the returned `G` satisfy an *identity*, not an
+/// inequality:
+///
+/// ```text
+/// A − G  =  ½(s + c₁ + c₂) − δ,        |δ| ≤ 2^-1075
+/// ```
+///
+/// `δ` is the halving's own rounding, which is zero unless the sum lands
+/// among the subnormals. So the figure returned here is the error, plus
+/// [`REFINED_RESIDUAL_SLACK`] for the four roundings that combined the
+/// residuals and [`RESIDUAL_UNDERFLOW`] for the one that cannot be
+/// combined at all.
+///
+/// # Why the sign is kept
+///
+/// The three residuals are summed **signed** and the absolute value taken
+/// once, at the end. Taking `|s| + |c₁| + |c₂|` instead would be sound and
+/// would repeat the first tier's mistake one level down: a trial whose own
+/// error terms cancel would then be charged for an error it does not have.
+/// The identity above holds for the signed sum, so there is nothing to
+/// give up by using it.
+///
+/// # Cost
+///
+/// Two two-sums, two `mul_add`s, two divisions and five additions, on a
+/// path reached only when the first tier could not clear the trial — so
+/// never for a cosine similarity or a PLDA log-likelihood ratio at any
+/// cohort spread this module has been measured on. `mul_add` is a
+/// software call on a target without a hardware `fma`; that cost was the
+/// reason not to make this the *primary* mechanism, and it is not a reason
+/// against a fallback.
+///
+/// # It is never looser than the tier that selected it
+///
+/// The closing `min` says so, and it is also what makes the refinement
+/// total. `two_sum_residual` yields `NaN` where a sum overflows — a branch
+/// [`half_sum`] exists for, and one the first tier cannot select, since
+/// two z-scores that overflow their sum share a sign and cancel by
+/// nothing — and `f64::min` returns the operand that is not `NaN`. A
+/// refinement that cannot be computed therefore refines nothing, rather
+/// than deciding by comparing against a `NaN`.
+pub(super) fn refined_error_bound(
+  raw: f64,
+  side: &CohortStats,
+  other: &CohortStats,
+  z_self: f64,
+  z_other: f64,
+  filtered: f64,
+) -> f64 {
+  let (correction_self, underflow_self) = side.z_terms(raw).correction(z_self);
+  let (correction_other, underflow_other) = other.z_terms(raw).correction(z_other);
+  let sum_residual = two_sum_residual(z_self, z_other);
+
+  let error = 0.5 * ((sum_residual + correction_self) + correction_other);
+  let residuals = 0.5 * ((sum_residual.abs() + correction_self.abs()) + correction_other.abs());
+  let underflow = 0.5 * (underflow_self + underflow_other);
+
+  let refined = error.abs() + (REFINED_RESIDUAL_SLACK * residuals + underflow);
+  refined.min(filtered)
 }
 
 /// The error a successful normalization is allowed to carry:
