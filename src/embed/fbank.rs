@@ -1136,7 +1136,10 @@ mod tests {
     let out = compute_full_fbank(&chunk).unwrap();
     let frames = out.len() / NUM_MEL_BINS;
     assert_eq!(frames, 148);
-    // torchaudio.compliance.kaldi.fbank reference values.
+    // torchaudio.compliance.kaldi.fbank reference values, verbatim at the
+    // precision the snippet above prints. Keeping `2.446_690`'s trailing
+    // digit preserves the table's uniform width and its provenance.
+    #[allow(clippy::excessive_precision)]
     let torchaudio_ref: [(usize, usize, f32); 8] = [
       (5, 0, 2.446_690),
       (5, 40, -4.950_203),

@@ -20,6 +20,8 @@ fn assign_embeddings_returns_one_cluster_when_num_train_lt_2() {
   let segmentations = vec![0.5; num_chunks * num_frames * num_speakers];
 
   // num_train = 1: only one active embedding survives filter_embeddings.
+  // `1 * plda_dim` names the shape (num_train = 1 row × `plda_dim`).
+  #[allow(clippy::identity_op)]
   let post_plda: Vec<f64> = vec![0.1; 1 * plda_dim];
   let phi = DVector::<f64>::from_element(plda_dim, 1.0);
   let train_chunk_idx = vec![0usize];
@@ -573,13 +575,15 @@ mod post_plda_finiteness_early_gate {
   use super::*;
   use crate::pipeline::error::NonFiniteField;
 
+  /// `(embeddings, segmentations, phi, train_chunk_idx, train_speaker_idx)`
+  /// — the non-`post_plda` half of an `assign_embeddings` input.
+  type NonFinitePostPldaInput = (Vec<f64>, Vec<f64>, DVector<f64>, Vec<usize>, Vec<usize>);
+
   /// Build the smallest valid `assign_embeddings` input that drives
   /// AHC (`num_train >= 2`) and has well-formed shapes/finiteness on
   /// every other field. The only non-finite value sits in `post_plda`
   /// — the gate must reject before AHC runs.
-  fn input_with_nonfinite_post_plda(
-    post_plda: &[f64],
-  ) -> (Vec<f64>, Vec<f64>, DVector<f64>, Vec<usize>, Vec<usize>) {
+  fn input_with_nonfinite_post_plda(post_plda: &[f64]) -> NonFinitePostPldaInput {
     let num_chunks = 1;
     let num_speakers = 3; // MAX_SPEAKER_SLOTS = 3
     let num_frames = 4;

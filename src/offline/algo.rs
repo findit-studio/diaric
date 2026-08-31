@@ -846,6 +846,10 @@ mod reconstruction_knob_validation_tests {
   //! surfaces a typed error before reconstruction silently corrupts
   //! span boundaries / top-k smoothing.
 
+  // The `1 * N * …` extents below name the tensor axes (chunks × speakers ×
+  // dim; chunks × frames × speakers) — folding the leading `1` away loses the shape.
+  #![allow(clippy::identity_op)]
+
   use super::*;
   use crate::reconstruct::SlidingWindow;
 

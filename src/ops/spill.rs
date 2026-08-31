@@ -8,7 +8,9 @@
 //!
 //! ## Two types: write-phase and read-phase
 //!
-//! Inspired by [`bytes::BytesMut`] / [`bytes::Bytes`]:
+//! Inspired by the `bytes` crate's `BytesMut` / `Bytes` (a design
+//! reference; `bytes` is not a dependency of this crate, so those names
+//! are code spans rather than intra-doc links):
 //!
 //! - [`SpillBytesMut<T>`] — **write-phase**, unique ownership. Use
 //!   while filling the buffer (`as_mut_slice`). Picks heap or
@@ -1128,8 +1130,9 @@ mod tests {
       *slot = if i.is_multiple_of(2) { 1 } else { 0 };
     }
     let s = v.as_slice();
-    for i in 0..16 {
-      assert_eq!(s[i], if i.is_multiple_of(2) { 1 } else { 0 });
+    assert_eq!(s.len(), 16);
+    for (i, &got) in s.iter().enumerate() {
+      assert_eq!(got, if i.is_multiple_of(2) { 1 } else { 0 });
     }
   }
 

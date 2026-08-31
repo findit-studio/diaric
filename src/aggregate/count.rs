@@ -1310,6 +1310,8 @@ mod try_variant_tests {
   /// frame-count computation as data loss.
   #[test]
   fn try_hamming_aggregate_rejects_zero_num_output_frames() {
+    // `1 * 2` names the shape; folding the leading `1` away loses it.
+    #[allow(clippy::identity_op)]
     let per_chunk = vec![0.0_f64; 1 * 2]; // 1 chunk, 2 frames/chunk.
     let r = try_hamming_aggregate(
       &per_chunk,

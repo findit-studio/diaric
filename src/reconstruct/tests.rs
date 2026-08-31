@@ -960,6 +960,10 @@ fn reconstruct_rejects_chunks_sw_step_at_f64_max() {
 /// cluster (index 2, activation 0.12) must be the selected one when
 /// `count = 1`; the old comparator could return any of {0, 1, 2}.
 #[test]
+// `1 * 3` below names the shape (1 output frame × 3 clusters); folding the
+// leading `1` away loses it. `allow` is ignored on a macro-invocation
+// statement, so it sits here, the narrowest scope where it applies.
+#[allow(clippy::identity_op)]
 fn reconstruct_smoothing_is_transitive_on_three_cluster_triangle() {
   use crate::reconstruct::Error;
   let frames_sw = SlidingWindow::new(0.0, 0.062, 0.0169);
