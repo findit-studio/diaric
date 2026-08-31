@@ -145,6 +145,37 @@
 //! 300 million. Selection itself is linear in the cohort, not
 //! `O(C log C)`, since only the membership of the top-N matters.
 //!
+//! # Range safety
+//!
+//! Cohort scores are `f64` and nothing constrains their magnitude, so
+//! several steps here can leave f64's range for inputs whose *answer* is
+//! perfectly representable. One rule covers all of them:
+//!
+//! > Perform the operation in a domain rescaled by an exact power of two,
+//! > chosen **from the operands**, and account for that factor exactly.
+//!
+//! Scaling by a power of two is exact, and it commutes with the rounding
+//! of `+`, `-`, `*`, `/` and `sqrt`. The rescaled computation therefore
+//! returns the number the unscaled one would have returned had it fitted:
+//! range safety costs no precision, which is why it needs no case analysis
+//! of when it is worth paying for.
+//!
+//! **Chosen from the operands** is the load-bearing half. A *fixed* factor
+//! moves the failure instead of removing it — halving unconditionally
+//! keeps a shift near [`f64::MAX`] in range and, in the same stroke,
+//! rounds a subnormal z-score to a signed zero. Three sites apply the
+//! rule, each taking its factor from the values in hand:
+//!
+//! | site | factor | what would leave the range |
+//! |---|---|---|
+//! | [`CohortStats::from_scores`] accumulators | `2^⌊log₂ max score⌋` | `Σx`, and `Σ(x − μ)²` for a cohort whose deviation is itself representable |
+//! | [`CohortStats::normalize`] shift | `1`, or `½` when `raw − μ` does not fit | a cohort mean near `-1.7e308`, against a trial score at the other end |
+//! | [`CohortStats::normalize`] average | `1`, or `½` when the two terms' sum does not fit | two terms of `1e308`, whose average is an ordinary `1e308` |
+//!
+//! What survives the rule is a genuine overflow — a quotient that really
+//! does exceed [`f64::MAX`] — and that is refused as
+//! [`Error::NonFiniteResult`], never returned.
+//!
 //! # Not implemented
 //!
 //! Matějka §4.1 also advises rejecting cohort scores outside ±4–5σ of the

@@ -59,21 +59,65 @@ impl CohortStats {
   ///
   /// The mean and the sum of squared deviations are both accumulated
   /// with the crate's Neumaier-compensated [`ops::kahan_sum`](crate::ops::kahan_sum),
-  /// and the variance is computed in **two passes** — mean first, then
-  /// `Σ(x − mean)²`. The one-pass `E[x²] − E[x]²` form cancels
-  /// catastrophically for cohorts that are tightly clustered far from
-  /// zero, which is not an exotic case but the *normal* one: AS-Norm
-  /// selects the top of the distribution, so the selected scores are
-  /// tightly clustered by construction.
+  /// and the variance is computed in **two passes** — never the one-pass
+  /// `E[x²] − E[x]²`, which cancels catastrophically for cohorts that are
+  /// tightly clustered far from zero. That is not an exotic case but the
+  /// *normal* one: AS-Norm selects the top of the distribution, so the
+  /// selected scores are tightly clustered by construction.
   ///
-  /// Both passes run over scores divided by an exact power of two, and
-  /// the scale is restored afterwards. That costs nothing — scaling by a
-  /// power of two commutes with the rounding of every operation involved,
-  /// so the statistics are bit-identical either way — and it makes the
-  /// function **total over finite scores**. Unscaled, `Σ(x − mean)²`
-  /// overflows for inputs whose deviation is representable, and `Σx` for
-  /// inputs whose mean is; compensated summation cannot recover from
-  /// either, because once a term is `inf` the compensation becomes `NaN`.
+  /// ## Dispersion is measured about a score the cohort contains
+  ///
+  /// The passes shift by a selected score before centring on the mean of
+  /// the shifted values, rather than centring on `μ` directly. Dispersion
+  /// is translation-invariant, so this changes nothing mathematically. It
+  /// changes the degenerate case.
+  ///
+  /// `Σx / n` is a *rounded* mean, and for a cohort whose scores are all
+  /// the same number it need not round back to that number. Five copies
+  /// of `0x1.fffffffffffffp+33` sum to a value needing 55 significant
+  /// bits, so the mean lands one ulp low and every score then "deviates"
+  /// from it by the same `2^-19`. That is dispersion the cohort does not
+  /// have; it clears the default `1e-6` floor, so the side is *accepted*,
+  /// and normalizing that same score against it divides the fabricated
+  /// deviation by itself and returns a perfect `1.0`.
+  ///
+  /// Shifting by a member first makes the constant case exactly zero **by
+  /// construction**: `x − x` is `0` for every finite `x`, so the shifted
+  /// set is all zeros, its mean is zero, and every squared deviation is
+  /// zero. [`AsNormOptions::min_deviation`] is then a policy knob for
+  /// cohorts that genuinely barely discriminate, rather than the last line
+  /// of defence against arithmetic that invents a spread — which is a load
+  /// it had already failed to carry.
+  ///
+  /// It is also more accurate in the regime AS-Norm actually runs in.
+  /// Measured against an exact-rational reference over 400 cohorts per
+  /// regime, worst-case error in `σ`: cosine scores of `1e-9` spread
+  /// 137.8 → 1.07 ulp, this crate's own tight-cluster-at-`1e8` case
+  /// 3.72 → 0.96 ulp, near-constant cohorts 1.6e16 → 1.28 ulp. Every
+  /// other regime measured — looser cosine spreads, full-range cosine,
+  /// PLDA-scale log-likelihood ratios — moves by at most 0.2 ulp in
+  /// either direction. The tight end is the one that matters: top-N
+  /// selection produces tightly clustered scores by construction, so it
+  /// is where every real cohort lands.
+  ///
+  /// `μ` is untouched — still the direct compensated mean, bit for bit.
+  /// Recovering it from the shifted domain as `anchor + shifted mean`
+  /// instead would cancel the shift back out and cost it hundreds of ulps
+  /// wherever the mean sits near zero, which is why the shift is confined
+  /// to the dispersion pass that needs it.
+  ///
+  /// ## Range
+  ///
+  /// Every pass runs over scores divided by an exact power of two, and
+  /// the scale is restored afterwards: the module's one [range-safety
+  /// rule](crate::score_norm#range-safety), whose factor here is
+  /// [`rescale_factor`]. That costs nothing — scaling by a power of two
+  /// commutes with the rounding of every operation involved, so the
+  /// statistics are bit-identical either way — and it makes the function
+  /// **total over finite scores**. Unscaled, `Σ(x − mean)²` overflows for
+  /// inputs whose deviation is representable, and `Σx` for inputs whose
+  /// mean is; compensated summation cannot recover from either, because
+  /// once a term is `inf` the compensation becomes `NaN`.
   ///
   /// # Errors
   ///
@@ -154,10 +198,22 @@ impl CohortStats {
     }
 
     let mean_scaled = kahan_sum(&buf) / n;
+
+    // Dispersion is translation-invariant, so measure it about a score the
+    // cohort actually contains rather than about the rounded mean. `x - x`
+    // is `0` for every finite `x`, so a cohort of one repeated score
+    // spreads by exactly zero *by construction* — see `# Numerics` above
+    // for the case that made this necessary. `selected` is at least
+    // `MIN_COHORT_SCORES`, so index 0 exists.
+    let anchor = buf[0];
+    for v in &mut buf {
+      *v -= anchor;
+    }
+    let anchored_mean = kahan_sum(&buf) / n;
     // Two-pass: square the mean-shifted values in place, so the second
     // compensated sum needs no extra allocation.
     for v in &mut buf {
-      let d = *v - mean_scaled;
+      let d = *v - anchored_mean;
       *v = d * d;
     }
     // Non-negative by construction — a sum of squares — so `sqrt` cannot
@@ -171,7 +227,7 @@ impl CohortStats {
     // anyway because a non-finite `σ` escaping as `Ok` would divide into
     // `normalize` and produce a finite-looking `0.0` — a plausible wrong
     // answer, which is the one outcome this module refuses. A non-finite
-    // `μ` needs no separate guard: it poisons every `*v - mean_scaled`,
+    // `μ` needs no separate guard: it poisons every `*v - anchored_mean`,
     // and so the deviation with it.
     if !deviation.is_finite() {
       return Err(Error::NonFiniteResult(deviation));
@@ -237,54 +293,103 @@ impl CohortStats {
   /// Symmetric in the two sides, so which one is "enrollment" and which
   /// is "test" does not matter.
   ///
-  /// Each term is computed shift-then-divide — the numerator is formed
-  /// first — rather than as `raw/σ − μ/σ`, which would build two large
-  /// quantities and subtract them.
+  /// Two of the three steps can leave f64's range for values this
+  /// module's own constructor accepts, and both are handled by the single
+  /// [range-safety rule](crate::score_norm#range-safety) — a power-of-two
+  /// factor chosen from the operands, `½` exactly when `1` will not do.
+  /// [`Self::z_score`] carries the shift, [`half_sum`] the average; each
+  /// documents its own case.
   ///
-  /// The `0.5` is pushed all the way in, onto `raw` and `μ` separately,
-  /// instead of being applied to the finished sum. Every step of that
-  /// migration is bit-neutral — `0.5 *` is exact, and halving commutes
-  /// with the rounding of a subtraction, a division and an addition alike
-  /// — so the result is unchanged wherever the naive order is
-  /// representable at all. What it buys is the cases where the naive
-  /// order is not, and both are reachable through this module's own front
-  /// door:
-  ///
-  /// - halving last overflows the **addition**: two terms of `1e308`
-  ///   average to `1e308`, but summing them first yields `inf`, and half
-  ///   of `inf` is `inf`;
-  /// - halving after the shift overflows the **subtraction**: a cohort
-  ///   near `-1.7e308` has a mean that far from zero, so `raw − μ`
-  ///   exceeds [`f64::MAX`] for a trial score at the other end of the
-  ///   range — while `(raw − μ) / 2σ` is an ordinary small number.
+  /// Neither factor is applied unconditionally, and that is the whole
+  /// point. Halving `raw` and `μ` on *every* call also keeps the shift in
+  /// range — and rounds a subnormal z-score to zero on the way. For
+  /// `μ = -u` and `σ = u`, with `u` the smallest positive subnormal, each
+  /// side's exact z-score for `raw = u` is `2`; but `0.5 * u` and
+  /// `0.5 * -u` are both a signed zero, so the numerator collapses and the
+  /// answer comes back as `0.0`. Finite, and wrong — which the
+  /// postcondition below cannot see, because being finite is all it
+  /// checks.
   ///
   /// # Errors
   ///
   /// - [`Error::NonFiniteScore`] — `raw` is `NaN` or `±inf`.
   /// - [`Error::NonFiniteResult`] — the normalized score is not finite
-  ///   although `raw` and both sides were. Reachable when the shifted
-  ///   numerator itself overflows, or when a deviation floor small enough
-  ///   to admit a near-zero `σ` lets the quotient run past [`f64::MAX`].
-  ///   A successful return is therefore always finite, which is what a
-  ///   consumer comparing against a fixed absolute threshold needs: `inf`
-  ///   clears every threshold, so an `Ok(inf)` would be an unconditional
-  ///   match.
+  ///   although `raw` and both sides were: a quotient that genuinely
+  ///   exceeds [`f64::MAX`], which a deviation floor small enough to admit
+  ///   a near-zero `σ` makes reachable. A successful return is therefore
+  ///   always finite, which is what a consumer comparing against a fixed
+  ///   absolute threshold needs: `inf` clears every threshold, so an
+  ///   `Ok(inf)` would be an unconditional match.
   pub fn normalize(&self, raw: f64, other: &CohortStats) -> Result<f64, Error> {
     if !raw.is_finite() {
       return Err(Error::NonFiniteScore(raw));
     }
-    let half = 0.5 * raw;
-    let normalized =
-      (half - 0.5 * self.mean) / self.deviation + (half - 0.5 * other.mean) / other.deviation;
+    let normalized = half_sum(self.z_score(raw), other.z_score(raw));
     if !normalized.is_finite() {
       return Err(Error::NonFiniteResult(normalized));
     }
     Ok(normalized)
   }
+
+  /// This side's standardized trial score, `(raw − μ) / σ`.
+  ///
+  /// The shift is formed first — not `raw/σ − μ/σ`, which builds two large
+  /// quantities and subtracts them. Where that shift leaves f64's range,
+  /// the [range-safety rule](crate::score_norm#range-safety) applies with
+  /// a factor of `½`, and that branch is reachable only where the halving
+  /// is exact: an overflowing difference leaves no room for a small
+  /// operand — neither can fall below `2^970`, or the subtraction would
+  /// have fitted — so both are large normals and `0.5 *` is exact on each.
+  /// Folding the same `½` into `σ` accounts for the factor: `(x/2) / (y/2)`
+  /// has the exact quotient `x / y` and rounds identically, so the halved
+  /// form returns precisely what the direct one would have returned had it
+  /// fitted.
+  ///
+  /// `0.5 * self.deviation` can itself round — `σ` may be subnormal under
+  /// a lowered floor — but only on a path whose answer does not exist:
+  /// a numerator past `f64::MAX / 2` over a subnormal `σ` exceeds
+  /// `f64::MAX` by hundreds of orders of magnitude, so the branch returns
+  /// an infinity that [`Self::normalize`] refuses, which is the correct
+  /// outcome however precisely the divisor was formed.
+  fn z_score(&self, raw: f64) -> f64 {
+    let shift = raw - self.mean;
+    if shift.is_finite() {
+      return shift / self.deviation;
+    }
+    (0.5 * raw - 0.5 * self.mean) / (0.5 * self.deviation)
+  }
+}
+
+/// The average of two standardized scores — AS-Norm1's `1/2`.
+///
+/// The [range-safety rule](crate::score_norm#range-safety) again, with the
+/// same `½`: two terms of `1e308` average to a representable `1e308`, but
+/// their sum is `inf` and half of `inf` is `inf`. As with the shift, an
+/// overflowing sum leaves no room for a small term — neither can fall
+/// below `2^970` — so both are large normals and halving each first is
+/// exact.
+///
+/// Applying the factor unconditionally is what must not happen. `0.5 * a`
+/// rounds a *subnormal* term to a signed zero, so two z-scores of `u`, the
+/// smallest positive subnormal, would average to `0.0` instead of `u`.
+/// Where the sum fits, `0.5 * (a + b)` is used instead — the sum of two
+/// subnormals is exact, and it is also the naive form the literature
+/// writes, so a threshold taken from a published AS-Norm number transfers
+/// bit for bit.
+fn half_sum(a: f64, b: f64) -> f64 {
+  let sum = a + b;
+  if sum.is_finite() {
+    return 0.5 * sum;
+  }
+  0.5 * a + 0.5 * b
 }
 
 /// The exact power of two a side's scores are divided by before its mean
 /// and deviation are accumulated: `2^⌊log₂ max|score|⌋`.
+///
+/// This is the accumulator row of the module's [range-safety
+/// rule](crate::score_norm#range-safety), and the one whose factor varies
+/// over the whole exponent range rather than between `1` and `½`.
 ///
 /// # Why a power of two, and why it is free
 ///

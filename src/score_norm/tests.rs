@@ -16,6 +16,29 @@ fn opts(n: usize) -> AsNormOptions {
   AsNormOptions::new().with_top_n(top_n(n))
 }
 
+/// `2^e`, assembled from the bit pattern so the construction itself
+/// cannot round: a normal for `e >= -1022`, a subnormal below that, and
+/// the full exponent range in one expression. The exact-reference sweeps
+/// build both their inputs and their expected answers out of these, so
+/// nothing rounded stands between an assertion and the arithmetic it is
+/// checking.
+fn pow2(e: i32) -> f64 {
+  assert!((-1074..=1023).contains(&e), "2^{e} is not a finite f64");
+  if e >= -1022 {
+    f64::from_bits(((e + 1023) as u64) << 52)
+  } else {
+    f64::from_bits(1u64 << (e + 1074))
+  }
+}
+
+/// The smallest positive subnormal — the sharpest floor
+/// [`AsNormOptions::with_min_deviation`] accepts, and the one the
+/// full-range sweeps need so a `σ` at the bottom of the range is not
+/// refused before it can be checked.
+fn tiniest_floor() -> f64 {
+  f64::from_bits(1)
+}
+
 /// Scoring closure for the identity cohorts below: the "item" *is* the
 /// score, so the tests exercise selection and statistics without any
 /// embedding arithmetic in the way.
@@ -657,12 +680,21 @@ fn statistics_are_total_over_finite_scores() {
 /// clustered, which is what top-N selection produces by construction.
 #[test]
 fn the_rescale_is_bit_neutral_in_the_cosine_regime() {
+  /// `from_scores` with the power-of-two rescale removed and **nothing
+  /// else changed** — the same anchored two-pass over the same
+  /// compensated sums. Any difference this test sees is therefore the
+  /// rescale's, which is the only thing it is entitled to measure.
   fn unscaled(scores: &[f64]) -> (f64, f64) {
     let n = scores.len() as f64;
     let mut buf = scores.to_vec();
     let mean = crate::ops::kahan_sum(&buf) / n;
+    let anchor = buf[0];
     for v in &mut buf {
-      let d = *v - mean;
+      *v -= anchor;
+    }
+    let anchored_mean = crate::ops::kahan_sum(&buf) / n;
+    for v in &mut buf {
+      let d = *v - anchored_mean;
       *v = d * d;
     }
     (mean, (crate::ops::kahan_sum(&buf) / n).sqrt())
@@ -783,12 +815,24 @@ fn the_shifted_numerator_is_halved_before_it_can_overflow() {
   );
 }
 
-/// The `0.5` migration must be free as well: the naive
-/// `0.5 * (t_self + t_other)` and the pushed-in form have to agree bit
-/// for bit wherever the naive one is representable at all. Only the cases
-/// where it is not are allowed to differ.
+/// Where nothing leaves f64's range, `normalize` must agree **bit for
+/// bit** with the naive `0.5 * (t_self + t_other)` the literature writes.
+/// That is what makes a threshold taken from a published AS-Norm number
+/// transfer exactly, and it is the claim the range-safety rule is
+/// obliged to keep.
+///
+/// Read honestly: in this regime both branch predicates are false, so the
+/// module evaluates that very expression and the agreement is by
+/// construction. What the test still catches is a *scale* creeping into
+/// the unscaled path — dividing `raw` and `μ` by a data-derived
+/// power of two and folding it into `σ` (the obvious unification of this
+/// module's two range mechanisms, and the one that was rejected) drifts by
+/// ~1e-15 relative here and would fail. The branches themselves are
+/// pinned by value in
+/// [`the_rescaled_branches_return_the_exact_value`] and by the two
+/// exact-reference sweeps, not here.
 #[test]
-fn the_pushed_in_half_is_bit_neutral_in_the_cosine_regime() {
+fn normalize_matches_the_naive_formula_bit_for_bit_in_the_cosine_regime() {
   // Deterministic xorshift64*, uniform in [-1, 1).
   let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
   let mut next = move || {
@@ -821,4 +865,286 @@ fn the_pushed_in_half_is_bit_neutral_in_the_cosine_regime() {
     }
   }
   assert_eq!(trials, 2_000, "the comparison must actually run");
+}
+
+// ── Trap 8: dispersion the cohort does not have ────────────────────────
+
+/// The headline case, at the default floor: five copies of
+/// `0x1.fffffffffffffp+33`.
+///
+/// Their sum needs 55 significant bits, so `Σx / n` cannot round back to
+/// the common value and lands one ulp below it. Every element then
+/// "deviates" from that rounded mean by the same `2^-19`, and `σ` is
+/// reported as `2^-19 = 1.907e-6` — **above** the default `1e-6` floor,
+/// so the side is accepted. Normalizing `raw = x` against it then divides
+/// the fabricated deviation by itself and returns `Ok(1.0)`: a perfect
+/// z-score for a cohort that does not discriminate at all, and one that
+/// clears any fixed match threshold below 1.
+#[test]
+fn a_constant_cohort_is_not_accepted_with_a_fabricated_deviation() {
+  let x = f64::from_bits(0x420f_ffff_ffff_ffff);
+  let err = CohortStats::from_scores([x; 5], &AsNormOptions::new())
+    .expect_err("five copies of one score do not discriminate");
+  let Error::DegenerateDeviation(d) = err else {
+    panic!("expected DegenerateDeviation, got {err:?}");
+  };
+  assert_eq!(
+    d.deviation(),
+    0.0,
+    "a cohort of one repeated score spreads by exactly nothing"
+  );
+  // The floor is a policy knob, not the guard that catches this: the
+  // fabricated deviation cleared it.
+  assert!(
+    2f64.powi(-19) > d.minimum(),
+    "the fabricated 2^-19 cleared the default floor {:e}",
+    d.minimum()
+  );
+}
+
+/// The same defect as a property rather than a case: a cohort whose
+/// selected scores are all the *same* number has a population standard
+/// deviation of exactly zero. Nothing about that depends on how the mean
+/// is computed — but a deviation pass anchored on `Σx / n` makes it
+/// depend on it anyway.
+#[test]
+fn an_exactly_constant_cohort_has_exactly_zero_dispersion() {
+  // Values whose repeated sum is not representable, so the rounded mean
+  // is not the common value. The last is the report's case.
+  let sharp = [
+    0x3ff5_5555_5555_5555u64,
+    0x3fef_ffff_ffff_ffff,
+    0x4069_9999_9999_999a,
+    0x420f_ffff_ffff_ffff,
+  ];
+  let mut checked = 0usize;
+  for bits in sharp {
+    let x = f64::from_bits(bits);
+    for n in [2usize, 3, 5, 7, 11] {
+      let err = CohortStats::from_scores(vec![x; n], &opts(n))
+        .expect_err("a cohort of identical scores does not discriminate");
+      let Error::DegenerateDeviation(d) = err else {
+        panic!("expected DegenerateDeviation for {n} copies of {x:e}, got {err:?}");
+      };
+      assert_eq!(
+        d.deviation(),
+        0.0,
+        "{n} copies of {x:e} spread by {:e}, but every score is the same number",
+        d.deviation()
+      );
+      checked += 1;
+    }
+  }
+  assert_eq!(checked, 20, "the sweep must actually run");
+}
+
+// ── Trap 9: finite is not the same as correct ──────────────────────────
+
+/// The finiteness postcondition cannot see a wrong answer. `0.0` is
+/// finite; here it is simply not the number AS-Norm defines.
+///
+/// With `u` the smallest positive subnormal, the cohort `[-2u, 0]` has
+/// `μ = -u` and `σ = u` exactly, so for `raw = u` each side's z-score is
+/// `(u - (-u)) / u = 2` and the average of two `2`s is `2`. Halving `raw`
+/// and `μ` *before* the shift rounds each to a signed zero — `u/2` is not
+/// representable — so the numerator collapses and the whole thing returns
+/// `Ok(0.0)`. Every guard in the module passes: the inputs are finite,
+/// `σ` clears its floor, and the result is finite.
+#[test]
+fn a_subnormal_z_score_is_not_erased_by_the_averaging() {
+  let u = f64::from_bits(1);
+  let options = opts(2).with_min_deviation(u);
+  let side = CohortStats::from_scores([-2.0 * u, 0.0], &options).expect("usable side");
+  assert_eq!(side.mean(), -u, "mu");
+  assert_eq!(side.deviation(), u, "sigma");
+
+  let got = as_norm(u, &side, &side).expect("2.0 is representable");
+  assert_eq!(
+    got, 2.0,
+    "z-score erased: (u - -u)/u = 2 on both sides, so the average is 2"
+  );
+}
+
+// ── Trap 10: the whole exponent range, checked by value ────────────────
+
+/// `from_scores` against an **exact** reference, at every representable
+/// power of two from the smallest subnormal to `2^1023`.
+///
+/// Each cohort is a small integer pattern times `2^e`. Both the pattern's
+/// population mean and its population deviation are themselves integers,
+/// so the exact answer is `(m, s) * 2^e` — an exact product, since
+/// multiplying a small integer by a power of two is exact everywhere it
+/// is representable, subnormals included. The assertion is therefore
+/// equality, not a tolerance, and no floating-point reference computation
+/// sits between it and the arithmetic under test.
+///
+/// This is the check the finiteness postcondition cannot make. `Ok` of a
+/// finite but wrong statistic passes every guard in the module; only
+/// comparing the value catches it.
+#[test]
+fn from_scores_matches_an_exact_reference_across_the_exponent_range() {
+  // (pattern, population mean, population deviation) — all integral.
+  const PATTERNS: [(&[i32], i32, i32); 6] = [
+    (&[-1, 1], 0, 1),
+    (&[1, 3], 2, 1),
+    (&[-1, -1, 1, 1], 0, 1),
+    (&[3, 3, 5, 5], 4, 1),
+    (&[-4, 0, 0, 0, 0, 0, 0, 4], 0, 2),
+    (&[-3, 1, 1, 1, 1, 1, 1, 5], 1, 2),
+  ];
+
+  let options = opts(8).with_min_deviation(tiniest_floor());
+  let mut checked = 0usize;
+  for (pattern, mean_i, deviation_i) in PATTERNS {
+    let peak = f64::from(
+      pattern
+        .iter()
+        .map(|k| k.abs())
+        .max()
+        .expect("non-empty pattern"),
+    );
+    for e in -1074i32..=1023 {
+      let unit = pow2(e);
+      // Skip only where an *input* would not be representable.
+      if !(peak * unit).is_finite() {
+        continue;
+      }
+      let scores: Vec<f64> = pattern.iter().map(|&k| f64::from(k) * unit).collect();
+      let stats = CohortStats::from_scores(scores.iter().copied(), &options)
+        .unwrap_or_else(|err| panic!("{pattern:?} * 2^{e} is a usable cohort, got {err:?}"));
+      assert_eq!(
+        stats.mean(),
+        f64::from(mean_i) * unit,
+        "mean of {pattern:?} * 2^{e}"
+      );
+      assert_eq!(
+        stats.deviation(),
+        f64::from(deviation_i) * unit,
+        "deviation of {pattern:?} * 2^{e}"
+      );
+      checked += 1;
+    }
+  }
+  assert!(checked > 12_000, "the sweep must actually run: {checked}");
+}
+
+/// `normalize` against an exact reference, over the same range.
+///
+/// Two sides are built at each scale: `[-2^e, 2^e]`, whose mean is `0` and
+/// whose deviation is `2^e`, and `[0, 2^(e+1)]`, whose mean and deviation
+/// are both `2^e`. For a trial score `k * 2^e` the first side's z-score is
+/// exactly `k` and the second's is exactly `k - 1`, so the AS-Norm average
+/// is exactly `k` for a matched pair and exactly `k - 0.5` for a mixed
+/// one. Every one of those is representable, at every scale — including
+/// the bottom, where `σ` is the smallest subnormal and the round-1
+/// halving returned `0.0` for an answer of `2`.
+#[test]
+fn normalize_matches_an_exact_reference_across_the_exponent_range() {
+  let options = opts(2).with_min_deviation(tiniest_floor());
+  let mut checked = 0usize;
+  let mut mixed = 0usize;
+  for e in -1074i32..=1023 {
+    let unit = pow2(e);
+    let centred =
+      CohortStats::from_scores([-unit, unit], &options).expect("a symmetric side at every scale");
+    assert_eq!(centred.mean(), 0.0, "mu at 2^{e}");
+    assert_eq!(centred.deviation(), unit, "sigma at 2^{e}");
+
+    // Mean and deviation both `2^e`, so this side's z-score is `k - 1`.
+    let offset = (2.0 * unit)
+      .is_finite()
+      .then(|| CohortStats::from_scores([0.0, 2.0 * unit], &options).expect("an offset side"));
+
+    for k in [-3i32, -2, -1, 0, 1, 2, 3] {
+      let raw = f64::from(k) * unit;
+      if !raw.is_finite() {
+        continue;
+      }
+      let matched = as_norm(raw, &centred, &centred).expect("an exactly representable z-score");
+      assert_eq!(matched, f64::from(k), "z-score of {k} * 2^{e}");
+      checked += 1;
+
+      if let Some(offset) = offset {
+        assert_eq!(offset.mean(), unit, "offset mu at 2^{e}");
+        assert_eq!(offset.deviation(), unit, "offset sigma at 2^{e}");
+        let got = as_norm(raw, &centred, &offset).expect("an exactly representable average");
+        assert_eq!(got, f64::from(k) - 0.5, "average of {k} and {} ", k - 1);
+        mixed += 1;
+      }
+    }
+  }
+  assert!(checked > 14_000, "the sweep must actually run: {checked}");
+  assert!(mixed > 14_000, "the mixed pair must actually run: {mixed}");
+}
+
+/// The two rescaled branches, checked by value rather than by tolerance.
+///
+/// Both are reachable only at the very top of the range, so neither sweep
+/// above reaches them; both are exactly representable, so neither needs a
+/// tolerance.
+#[test]
+fn the_rescaled_branches_return_the_exact_value() {
+  let options = opts(2).with_min_deviation(tiniest_floor());
+
+  // The shift. mu = -2^1023 and sigma = 2^1022, so `raw - mu` is 2^1024 —
+  // an overflow — while the answer it stands for is exactly 4.
+  let side = CohortStats::from_scores([-3.0 * pow2(1022), -pow2(1022)], &options)
+    .expect("a side whose mean sits at -2^1023");
+  assert_eq!(side.mean(), -pow2(1023), "mu");
+  assert_eq!(side.deviation(), pow2(1022), "sigma");
+  assert!(
+    !(pow2(1023) - side.mean()).is_finite(),
+    "the unscaled shift must really overflow, or this proves nothing"
+  );
+  assert_eq!(
+    as_norm(pow2(1023), &side, &side).expect("4 is representable"),
+    4.0
+  );
+
+  // The average. Each side standardizes `raw` to exactly f64::MAX, whose
+  // sum overflows and whose average is f64::MAX.
+  let side = CohortStats::from_scores([-pow2(-100), pow2(-100)], &options).expect("a tiny sigma");
+  assert_eq!(side.deviation(), pow2(-100), "sigma");
+  let raw = f64::MAX * pow2(-100);
+  assert_eq!(raw / side.deviation(), f64::MAX, "each term is f64::MAX");
+  assert!(
+    !(f64::MAX + f64::MAX).is_finite(),
+    "the unscaled sum must really overflow"
+  );
+  assert_eq!(
+    as_norm(raw, &side, &side).expect("f64::MAX is representable"),
+    f64::MAX
+  );
+}
+
+/// A one-ulp spread, measured exactly, at every scale in the normal range.
+///
+/// The cohort is `[x, x + ulp]` for `x = 1.5 * 2^e`. Its exact mean is
+/// `x + ulp/2`, which needs 54 significant bits and so is **not**
+/// representable — it rounds to `x` — while its exact deviation is
+/// `ulp/2`, which is a power of two and is representable everywhere.
+///
+/// That gap is the whole point. Centring the second pass on the rounded
+/// mean gives deviations of `0` and `ulp`, hence `σ = ulp/√2` — 41% high,
+/// at every scale, for a cohort AS-Norm's top-N selection produces
+/// routinely. Centring on a member gives `∓ulp/2` and the exact answer.
+/// This is the same defect as the constant-cohort case one step away from
+/// degenerate, where it is no longer caught by any floor because the side
+/// is legitimately usable.
+#[test]
+fn a_one_ulp_spread_is_measured_exactly_across_the_exponent_range() {
+  let options = opts(2).with_min_deviation(tiniest_floor());
+  let mut checked = 0usize;
+  // `ulp/2` is `2^(e-53)`, so the smallest `e` whose deviation is still
+  // representable is `-1021`.
+  for e in -1021i32..=1023 {
+    let x = pow2(e) + pow2(e - 1); // 1.5 * 2^e, exact
+    let ulp = pow2(e - 52);
+    let stats = CohortStats::from_scores([x, x + ulp], &options)
+      .unwrap_or_else(|err| panic!("[x, x+ulp] at 2^{e} is usable, got {err:?}"));
+    assert_eq!(stats.mean(), x, "mean at 2^{e} (exact mean rounds to x)");
+    assert_eq!(stats.deviation(), pow2(e - 53), "deviation at 2^{e}");
+    checked += 1;
+  }
+  assert_eq!(checked, 2_045, "the sweep must actually run: {checked}");
 }
