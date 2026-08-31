@@ -37,8 +37,35 @@ pub enum Error {
   /// The selected top-N cohort scores are identical to within the
   /// configured floor, so `(s - mean) / deviation` has no usable
   /// denominator.
+  ///
+  /// The payload's deviation is always a real, finite spread. An
+  /// arithmetic blow-up is [`Self::NonFiniteResult`] instead — a variant
+  /// whose name reports what happened, rather than this one claiming a
+  /// degenerate cohort for a cohort that is merely large.
   #[error("score_norm: {0}")]
   DegenerateDeviation(DegenerateDeviation),
+
+  /// A value this module *computed* came out non-finite even though every
+  /// input to it was finite: a side's standard deviation, or a normalized
+  /// trial score.
+  ///
+  /// Carries the offending value. Distinct from [`Self::NonFiniteScore`],
+  /// which rejects a non-finite *input* — here the inputs were all sound
+  /// and the arithmetic left f64's range anyway, which a caller may want
+  /// to act on differently (rescale the scoring function, widen the
+  /// deviation floor).
+  ///
+  /// # Why this is a refusal and not an `Ok`
+  ///
+  /// A normalized score is consumed by comparing it against a **fixed
+  /// absolute threshold** — that is the entire reason AS-Norm keeps its
+  /// `0.5` (see the [module docs](crate::score_norm)). `+inf` clears
+  /// every such threshold, so returning it as `Ok` is an unconditional
+  /// match: the one failure this module exists to prevent, arriving
+  /// silently. `NaN` fails every comparison instead, which is an
+  /// unconditional *non*-match — quieter still.
+  #[error("score_norm: computed value is not finite ({0})")]
+  NonFiniteResult(f64),
 
   /// [`AsNormOptions::min_deviation`](crate::score_norm::AsNormOptions::min_deviation)
   /// is not finite and strictly positive.

@@ -6,8 +6,10 @@ use crate::score_norm::{AsNormOptions, CohortStats, Error};
 ///
 /// The key exists for one reason — so
 /// [`Cohort::stats_excluding`] can keep a speaker out of its own cohort.
-/// It is compared with [`PartialEq`] and nothing else, so anything that
-/// names a speaker works: a `u32` row id, a `String`, a cluster label.
+/// It is compared for equality and nothing else, so anything that names a
+/// speaker works: a `u32` row id, a `String`, a cluster label. The
+/// comparison is [`Eq`], not [`PartialEq`] — see
+/// [`Cohort::stats_excluding`] for why the difference is load-bearing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CohortEntry<K, T> {
   speaker: K,
@@ -128,7 +130,7 @@ impl<K, T> Cohort<K, T> {
   }
 }
 
-impl<K: PartialEq, T> Cohort<K, T> {
+impl<K: Eq, T> Cohort<K, T> {
   /// Statistics for `side`, excluding every entry belonging to
   /// `speaker`.
   ///
@@ -177,6 +179,47 @@ impl<K: PartialEq, T> Cohort<K, T> {
   /// speaker appears in. Excluding the partner too would make the
   /// statistics trial-dependent and give back the quadratic cost the
   /// precomputation exists to avoid.
+  ///
+  /// # Why `K: Eq` and not `K: PartialEq`
+  ///
+  /// Identity exclusion is `entry.speaker != *speaker`, and that is a
+  /// correct exclusion test only if a key equals **itself**. [`Eq`] is
+  /// precisely the marker for that reflexivity; [`PartialEq`] promises
+  /// only symmetry and transitivity, and `f64` is the standard type that
+  /// takes the licence: `f64::NAN != f64::NAN` is `true`, so a `NaN`
+  /// speaker key does not match its own entry and the filter keeps it.
+  ///
+  /// That is not a near-miss. A retained self-entry scores `1.0` under
+  /// cosine — the global maximum — so it is *guaranteed* to be selected
+  /// into the top-N and to sit at the top of it. With cohort scores
+  /// `[self 1.0, 0.8, 0.2]` and `top_n = 2` the selection becomes
+  /// `[1.0, 0.8]` instead of `[0.8, 0.2]`, and every normalized score for
+  /// that speaker is biased — silently, since the side still looks
+  /// healthy.
+  ///
+  /// Requiring [`Eq`] makes that state unrepresentable rather than
+  /// diagnosed: a non-reflexive key is rejected by the compiler, at the
+  /// call site, with no runtime check to forget. Every sensible speaker
+  /// identity — an integer id, a `String`, a `&str`, a cluster label, a
+  /// UUID — is already [`Eq`]; only the floating-point types are not.
+  ///
+  /// ```compile_fail,E0277
+  /// use diaric::score_norm::{AsNormOptions, Cohort};
+  /// // `f64` is `PartialEq` but not `Eq`, so it cannot be a speaker key.
+  /// let mut cohort: Cohort<f64, f64> = Cohort::new();
+  /// cohort.push(f64::NAN, 0.5);
+  /// let _ = cohort.stats_excluding(
+  ///   &f64::NAN,
+  ///   &(),
+  ///   |_: &(), item: &f64| *item,
+  ///   &AsNormOptions::new(),
+  /// );
+  /// ```
+  ///
+  /// The bound sits on this method's `impl` block alone. Building a
+  /// cohort, reading it back and
+  /// [`stats_assuming_disjoint`](Self::stats_assuming_disjoint) never
+  /// compare keys, so they keep working for any `K` at all.
   ///
   /// # Errors
   ///

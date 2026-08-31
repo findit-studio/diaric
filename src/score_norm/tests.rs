@@ -526,3 +526,299 @@ fn options_serde_roundtrip() {
   let empty: AsNormOptions = serde_json::from_str("{}").expect("deserialize empty");
   assert_eq!(empty, AsNormOptions::default());
 }
+
+// ── Trap 5: identity keys must be reflexive ────────────────────────────
+
+// `stats_excluding` requires `K: Eq`, so a non-reflexive key — `f64`, via
+// `NAN != NAN` — cannot reach it at all. That is a *compile-time* guard,
+// and it is pinned by the `compile_fail` doctest on `stats_excluding`
+// itself rather than here; a runtime test cannot express "this does not
+// build". The tests below pin the other half: that ordinary `Eq` keys are
+// unaffected.
+
+/// A `String` key — owned, non-`Copy`, `Eq` — excludes exactly its own
+/// entries. `Eq` costs no realistic caller anything.
+#[test]
+fn an_owned_eq_key_still_excludes_its_own_entries() {
+  let cohort = Cohort::from_entries(vec![
+    CohortEntry::new(String::from("alice"), 0.99),
+    CohortEntry::new(String::from("bob"), 0.20),
+    CohortEntry::new(String::from("carol"), 0.40),
+    CohortEntry::new(String::from("alice"), 0.98),
+  ]);
+  let stats = cohort
+    .stats_excluding(&String::from("alice"), &(), item_score, &opts(2))
+    .expect("two impostors remain");
+  assert_eq!(stats.considered(), 2, "both alice entries dropped");
+  assert!((stats.mean() - 0.30).abs() < 1e-12, "mean {}", stats.mean());
+}
+
+// ── Trap 6: representable statistics must be computed, not refused ─────
+
+/// The squares overflow where the deviation does not. Scores `[-1e155,
+/// 1e155]` have mean `0` and population deviation `1e155` — both
+/// perfectly representable — but each `d * d` is `1e310`. Compensated
+/// summation cannot recover from that: the infinities cancel into a
+/// `NaN`, and the side was refused as "degenerate" when it is nothing of
+/// the sort.
+#[test]
+fn a_representable_deviation_far_from_zero_is_computed() {
+  let stats = CohortStats::from_scores([-1e155, 1e155], &opts(2))
+    .expect("mean 0 and deviation 1e155 are both representable");
+  assert_eq!(stats.mean(), 0.0);
+  assert_eq!(stats.deviation(), 1e155);
+}
+
+/// The same defect one pass earlier: `Σx` overflows for scores whose
+/// *mean* is representable, and the compensated sum turns the overflow
+/// into a `NaN` that poisons everything downstream of it.
+#[test]
+fn a_representable_mean_of_huge_scores_is_computed() {
+  let big = 1.7e308;
+  let stats =
+    CohortStats::from_scores([big, big, -big], &opts(3)).expect("mean and deviation are finite");
+  let expected_mean = big / 3.0;
+  assert!(
+    (stats.mean() - expected_mean).abs() <= expected_mean * 1e-15,
+    "mean {} != {expected_mean}",
+    stats.mean()
+  );
+  // Population deviation of {b, b, -b} is b * sqrt(8)/3.
+  let expected_dev = big * 8f64.sqrt() / 3.0;
+  assert!(
+    (stats.deviation() - expected_dev).abs() <= expected_dev * 1e-15,
+    "deviation {} != {expected_dev}",
+    stats.deviation()
+  );
+}
+
+/// The underflow direction of the same defect, and the one that shows in
+/// an error payload: `[-1e-200, 1e-200]` spreads by `1e-200`, but each
+/// `d * d` is `1e-400` and flushes to zero, so the side was refused with a
+/// deviation of exactly `0` — a number it does not have. The refusal is
+/// still correct (`1e-200` is far below the floor); the *reported reason*
+/// was not.
+#[test]
+fn a_tiny_deviation_is_reported_at_its_real_magnitude() {
+  let err =
+    CohortStats::from_scores([-1e-200, 1e-200], &opts(2)).expect_err("1e-200 is below the floor");
+  let Error::DegenerateDeviation(d) = err else {
+    panic!("expected DegenerateDeviation, got {err:?}");
+  };
+  assert_eq!(d.deviation(), 1e-200, "the payload must not report 0");
+  assert_eq!(d.minimum(), crate::score_norm::DEFAULT_MIN_DEVIATION);
+}
+
+/// Totality, swept end to end across f64's exponent range: a set of
+/// finite scores either yields finite statistics or is refused for a
+/// reason that is about the *cohort*. A non-finite statistic must never
+/// be handed back as `Ok`, and `NonFiniteResult` — the postcondition that
+/// would catch one — must never fire.
+#[test]
+fn statistics_are_total_over_finite_scores() {
+  let options = opts(4).with_min_deviation(f64::MIN_POSITIVE);
+  let mut checked = 0usize;
+  for exp in -320i32..=308 {
+    let m = 10f64.powi(exp);
+    if m == 0.0 {
+      continue;
+    }
+    for scores in [
+      vec![-m, m, -m, m],
+      vec![m, m, m, -m],
+      vec![m, -m, m / 3.0, -m / 7.0],
+      vec![f64::MAX, f64::MAX, -f64::MAX, m],
+      vec![-f64::MAX, f64::MIN_POSITIVE, f64::MAX, m],
+    ] {
+      checked += 1;
+      match CohortStats::from_scores(scores.iter().copied(), &options) {
+        Ok(s) => {
+          assert!(s.mean().is_finite(), "mean {} for {scores:?}", s.mean());
+          assert!(
+            s.deviation().is_finite(),
+            "deviation {} for {scores:?}",
+            s.deviation()
+          );
+        }
+        Err(Error::NonFiniteResult(v)) => {
+          panic!("non-finite statistic {v} for {scores:?}")
+        }
+        Err(_) => {}
+      }
+    }
+  }
+  assert!(checked > 3_000, "the sweep must actually run: {checked}");
+}
+
+/// The rescale is a power of two precisely so it is *free*: the
+/// compensated two-pass must produce bit-identical statistics with and
+/// without it. Recomputes the unscaled form inline and demands exact
+/// equality over the only regime that occurs — cosine scores, tightly
+/// clustered, which is what top-N selection produces by construction.
+#[test]
+fn the_rescale_is_bit_neutral_in_the_cosine_regime() {
+  fn unscaled(scores: &[f64]) -> (f64, f64) {
+    let n = scores.len() as f64;
+    let mut buf = scores.to_vec();
+    let mean = crate::ops::kahan_sum(&buf) / n;
+    for v in &mut buf {
+      let d = *v - mean;
+      *v = d * d;
+    }
+    (mean, (crate::ops::kahan_sum(&buf) / n).sqrt())
+  }
+
+  // Deterministic xorshift64*, uniform in [-1, 1).
+  let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+  let mut next = move || {
+    state ^= state >> 12;
+    state ^= state << 25;
+    state ^= state >> 27;
+    let v = state.wrapping_mul(0x2545_F491_4F6C_DD1D);
+    ((v >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+  };
+
+  let options = opts(300).with_min_deviation(1e-15);
+  let mut cohorts = 0usize;
+  for spread in [1e-9f64, 1e-6, 1e-3, 1e-1, 5e-1] {
+    for _ in 0..200 {
+      // `base` and `spread` are bounded so every score lands in [-1, 1]
+      // without clamping, which would manufacture ties.
+      let base = next() * 0.5;
+      let scores: Vec<f64> = (0..300).map(|_| base + spread * next()).collect();
+      let stats = CohortStats::from_scores(scores.iter().copied(), &options).expect("usable side");
+      let (mean, deviation) = unscaled(&scores);
+      assert_eq!(
+        stats.mean().to_bits(),
+        mean.to_bits(),
+        "rescaled mean {} != unscaled {mean} (spread {spread})",
+        stats.mean()
+      );
+      assert_eq!(
+        stats.deviation().to_bits(),
+        deviation.to_bits(),
+        "rescaled deviation {} != unscaled {deviation} (spread {spread})",
+        stats.deviation()
+      );
+      cohorts += 1;
+    }
+  }
+  assert_eq!(cohorts, 1_000, "the comparison must actually run");
+}
+
+// ── Trap 7: a successful normalization is finite ───────────────────────
+
+/// The `0.5` must reach each term before they are added. Both sides here
+/// standardize `1e208` to `1e308`, whose true average is `1e308` — but
+/// summing first overflows and then halves an infinity.
+#[test]
+fn the_average_is_halved_before_the_terms_are_summed() {
+  let options = opts(2).with_min_deviation(1e-101);
+  let side = CohortStats::from_scores([-1e-100, 1e-100], &options).expect("usable side");
+  assert_eq!(side.deviation(), 1e-100, "sigma");
+
+  let got = as_norm(1e208, &side, &side).expect("a representable normalized score");
+  assert!(got.is_finite(), "the 0.5 was applied too late: got {got}");
+  assert!(
+    (got - 1e308).abs() <= 1e308 * 1e-15,
+    "normalized {got} != 1e308"
+  );
+}
+
+/// Halving early widens the representable range but does not make it
+/// infinite. When the result genuinely will not fit, it must be refused —
+/// never returned as `Ok(inf)`, which a consumer comparing against a
+/// fixed absolute threshold would read as an unconditional match.
+#[test]
+fn a_non_finite_normalized_score_is_refused() {
+  let options = opts(2).with_min_deviation(1e-31);
+  let side = CohortStats::from_scores([-1e-30, 1e-30], &options).expect("usable side");
+
+  let err = as_norm(1e290, &side, &side).expect_err("1e290 / 1e-30 runs past f64::MAX");
+  let Error::NonFiniteResult(v) = err else {
+    panic!("expected NonFiniteResult, got {err:?}");
+  };
+  assert!(v.is_infinite(), "the offending value is carried: {v}");
+  assert!(err.to_string().contains("not finite"), "message: {err}");
+}
+
+/// A successful normalization is finite for every side and every trial
+/// score the constructor admits — the postcondition stated as a sweep,
+/// not a single case.
+#[test]
+fn a_successful_normalization_is_always_finite() {
+  let options = opts(2).with_min_deviation(f64::MIN_POSITIVE);
+  let mut checked = 0usize;
+  for exp in -300i32..=300 {
+    let m = 10f64.powi(exp);
+    let Ok(side) = CohortStats::from_scores([-m, m], &options) else {
+      continue;
+    };
+    for raw in [0.0, 1.0, -1.0, m, -m, f64::MAX, -f64::MAX] {
+      checked += 1;
+      if let Ok(got) = as_norm(raw, &side, &side) {
+        assert!(got.is_finite(), "Ok({got}) for raw {raw}, sigma {m}");
+      }
+    }
+  }
+  assert!(checked > 3_000, "the sweep must actually run: {checked}");
+}
+
+/// The shifted numerator must not overflow either. `from_scores` accepts
+/// a cohort whose mean sits near `-1.7e308`, so `raw - mean` runs past
+/// `f64::MAX` for a trial score at the other end of the range — while the
+/// answer it stands for is an ordinary small number. Halving `raw` and
+/// the mean separately keeps it representable, bit-neutrally.
+#[test]
+fn the_shifted_numerator_is_halved_before_it_can_overflow() {
+  let side = CohortStats::from_scores([-1.7e308, -1.6e308], &opts(2)).expect("usable side");
+  assert!((side.mean() + 1.65e308).abs() <= 1.65e308 * 1e-12, "mu");
+  assert!((side.deviation() - 5e306).abs() <= 5e306 * 1e-12, "sigma");
+
+  // (1.7e308 + 1.65e308) / 5e306 = 67, both sides alike.
+  let got = as_norm(1.7e308, &side, &side).expect("an ordinary normalized score");
+  assert!(
+    (got - 67.0).abs() <= 67.0 * 1e-12,
+    "normalized {got} != 67 — the shift overflowed"
+  );
+}
+
+/// The `0.5` migration must be free as well: the naive
+/// `0.5 * (t_self + t_other)` and the pushed-in form have to agree bit
+/// for bit wherever the naive one is representable at all. Only the cases
+/// where it is not are allowed to differ.
+#[test]
+fn the_pushed_in_half_is_bit_neutral_in_the_cosine_regime() {
+  // Deterministic xorshift64*, uniform in [-1, 1).
+  let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+  let mut next = move || {
+    state ^= state >> 12;
+    state ^= state << 25;
+    state ^= state >> 27;
+    let v = state.wrapping_mul(0x2545_F491_4F6C_DD1D);
+    ((v >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+  };
+
+  let options = opts(8).with_min_deviation(1e-15);
+  let mut trials = 0usize;
+  for spread in [1e-9f64, 1e-6, 1e-3, 1e-1, 5e-1] {
+    for _ in 0..400 {
+      let base_e = next() * 0.5;
+      let scores_e: Vec<f64> = (0..8).map(|_| base_e + spread * next()).collect();
+      let base_t = next() * 0.5;
+      let scores_t: Vec<f64> = (0..8).map(|_| base_t + spread * next()).collect();
+      let e = CohortStats::from_scores(scores_e, &options).expect("side e");
+      let t = CohortStats::from_scores(scores_t, &options).expect("side t");
+      let raw = next();
+      let naive = 0.5 * ((raw - e.mean()) / e.deviation() + (raw - t.mean()) / t.deviation());
+      let got = as_norm(raw, &e, &t).expect("finite");
+      assert_eq!(
+        got.to_bits(),
+        naive.to_bits(),
+        "reordered {got} != naive {naive} (spread {spread}, raw {raw})"
+      );
+      trials += 1;
+    }
+  }
+  assert_eq!(trials, 2_000, "the comparison must actually run");
+}
