@@ -67,6 +67,32 @@ pub enum Error {
   #[error("score_norm: computed value is not finite ({0})")]
   NonFiniteResult(f64),
 
+  /// The two sides' z-scores cancel so completely that the average would
+  /// be made of their own rounding rather than of the data.
+  ///
+  /// `(raw − μ) / σ` costs two rounded operations, so each z-score is
+  /// carried with a relative error of about `2^-52`. Averaging two of them
+  /// keeps that error *absolutely* while the sum shrinks: for z-scores
+  /// near `2^50` the discarded bits are worth `0.25`, and if the two sides
+  /// land one ulp apart with opposite signs, `0.25` is the entire result.
+  /// The returned value can then have the wrong sign — and every guard
+  /// above it passes, because every intermediate is finite and every
+  /// deviation is real.
+  ///
+  /// Refused rather than returned once
+  /// [`ZScoreCancellation::error_bound`] exceeds
+  /// [`ZScoreCancellation::tolerance`]; see
+  /// [`MAX_NORMALIZED_ERROR`](crate::score_norm::MAX_NORMALIZED_ERROR) for
+  /// what a successful normalization carries instead, and the
+  /// [module docs](crate::score_norm#accuracy) for why the bound is sound.
+  ///
+  /// Reaching this needs a score source spanning ~`1e9` *and* a cohort
+  /// deviation at the floor: cosine similarities live in `[-1, 1]` and
+  /// PLDA log-likelihood ratios in the tens, so at the default floor the
+  /// widest trial either can construct is still 2147 times short of it.
+  #[error("score_norm: {0}")]
+  ZScoreCancellation(ZScoreCancellation),
+
   /// [`AsNormOptions::min_deviation`](crate::score_norm::AsNormOptions::min_deviation)
   /// is not finite and strictly positive.
   ///
@@ -160,6 +186,81 @@ impl core::fmt::Display for DegenerateDeviation {
       "standard deviation {:.3e} over {} selected score(s) is below the floor {:.3e}; \
        the cohort does not discriminate",
       self.deviation, self.selected, self.minimum
+    )
+  }
+}
+
+/// Payload of [`Error::ZScoreCancellation`].
+///
+/// Carries both standardized scores and the average they would have
+/// produced, so a caller can see the cancellation itself rather than only
+/// its verdict.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZScoreCancellation {
+  z_self: f64,
+  z_other: f64,
+  normalized: f64,
+}
+
+impl ZScoreCancellation {
+  pub(crate) const fn new(z_self: f64, z_other: f64, normalized: f64) -> Self {
+    Self {
+      z_self,
+      z_other,
+      normalized,
+    }
+  }
+
+  /// The receiver's standardized trial score, `(raw − μ) / σ`.
+  ///
+  /// "Self" and "other" are
+  /// [`CohortStats::normalize`](crate::score_norm::CohortStats::normalize)'s
+  /// two sides; through [`as_norm`](crate::score_norm::as_norm) they are
+  /// the enrollment and test sides in that order. The operation is
+  /// symmetric, so which is which changes nothing but the label.
+  pub const fn z_self(&self) -> f64 {
+    self.z_self
+  }
+
+  /// The other side's standardized trial score.
+  pub const fn z_other(&self) -> f64 {
+    self.z_other
+  }
+
+  /// The average that was computed and refused.
+  ///
+  /// Kept because it is the thing under suspicion: a caller comparing it
+  /// against [`Self::error_bound`] can see how much of it is data.
+  pub const fn normalized(&self) -> f64 {
+    self.normalized
+  }
+
+  /// How far [`Self::normalized`] may sit from the exact average of the
+  /// two z-scores — the quantity that exceeded [`Self::tolerance`].
+  pub fn error_bound(&self) -> f64 {
+    super::stats::z_score_error_bound(self.z_self, self.z_other)
+  }
+
+  /// The largest error a *successful* normalization carries:
+  /// [`MAX_NORMALIZED_ERROR`](crate::score_norm::MAX_NORMALIZED_ERROR)
+  /// standard deviations, or that much relative once the result exceeds
+  /// one.
+  pub fn tolerance(&self) -> f64 {
+    super::stats::permitted_error(self.normalized)
+  }
+}
+
+impl core::fmt::Display for ZScoreCancellation {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    write!(
+      f,
+      "z-scores {:.6e} and {:.6e} cancel to {:.6e}, which their own rounding could move by \
+       up to {:.3e}; a successful normalization carries at most {:.3e}",
+      self.z_self,
+      self.z_other,
+      self.normalized,
+      self.error_bound(),
+      self.tolerance()
     )
   }
 }

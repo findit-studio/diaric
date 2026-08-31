@@ -5,7 +5,7 @@ use crate::{
   ops::kahan_sum,
   score_norm::{
     AsNormOptions, Error,
-    error::{CohortTooSmall, DegenerateDeviation},
+    error::{CohortTooSmall, DegenerateDeviation, ZScoreCancellation},
     options::MIN_COHORT_SCORES,
   },
 };
@@ -310,6 +310,26 @@ impl CohortStats {
   /// postcondition below cannot see, because being finite is all it
   /// checks.
   ///
+  /// # Accuracy, and the second postcondition
+  ///
+  /// Being finite is not the same as being right. Each z-score costs two
+  /// rounded operations, so it is carried with a relative error of about
+  /// `2^-52` — negligible against itself, and *not* negligible against
+  /// their average once the two cancel. Averaging keeps that error at its
+  /// absolute size while the sum shrinks, so for z-scores large enough the
+  /// discarded bits are the whole answer, sign included. A successful
+  /// return therefore also satisfies
+  ///
+  /// ```text
+  /// |returned − exact| ≤ MAX_NORMALIZED_ERROR * max(|returned|, 1)
+  /// ```
+  ///
+  /// where `exact` is the exact average of the two z-scores the stored
+  /// statistics define. Anything looser is [`Error::ZScoreCancellation`].
+  /// See the [module docs](crate::score_norm#accuracy) for why the bound
+  /// is a bound and not an estimate; nothing here changes a value, so
+  /// every answer this returns is the one it always returned.
+  ///
   /// # Errors
   ///
   /// - [`Error::NonFiniteScore`] — `raw` is `NaN` or `±inf`.
@@ -320,13 +340,24 @@ impl CohortStats {
   ///   always finite, which is what a consumer comparing against a fixed
   ///   absolute threshold needs: `inf` clears every threshold, so an
   ///   `Ok(inf)` would be an unconditional match.
+  /// - [`Error::ZScoreCancellation`] — the two z-scores cancel past the
+  ///   accuracy above. At the default deviation floor no bounded score
+  ///   source reaches it: a cosine similarity or a PLDA log-likelihood
+  ///   ratio falls short by three orders of magnitude.
   pub fn normalize(&self, raw: f64, other: &CohortStats) -> Result<f64, Error> {
     if !raw.is_finite() {
       return Err(Error::NonFiniteScore(raw));
     }
-    let normalized = half_sum(self.z_score(raw), other.z_score(raw));
+    let z_self = self.z_score(raw);
+    let z_other = other.z_score(raw);
+    let normalized = half_sum(z_self, z_other);
     if !normalized.is_finite() {
       return Err(Error::NonFiniteResult(normalized));
+    }
+    if z_score_error_bound(z_self, z_other) > permitted_error(normalized) {
+      return Err(Error::ZScoreCancellation(ZScoreCancellation::new(
+        z_self, z_other, normalized,
+      )));
     }
     Ok(normalized)
   }
@@ -382,6 +413,87 @@ fn half_sum(a: f64, b: f64) -> f64 {
     return 0.5 * sum;
   }
   0.5 * a + 0.5 * b
+}
+
+/// The largest error a successful [`CohortStats::normalize`] carries, in
+/// the unit its result is measured in: **one cohort standard deviation**.
+///
+/// `2^-20`. A successful normalization lands within
+/// `MAX_NORMALIZED_ERROR * max(|result|, 1)` of the exact average of the
+/// two z-scores the stored statistics define — absolute while the result
+/// is at most one standard deviation, relative beyond. Anything looser is
+/// [`Error::ZScoreCancellation`] instead of an `Ok`; see the [module
+/// docs](crate::score_norm#accuracy) for the bound behind it.
+///
+/// # Why this size
+///
+/// Three things pin it, and they pin it from both directions.
+///
+/// - **No threshold can see it.** AS-Norm exists so that a *fixed
+///   absolute* threshold means the same thing for every speaker, and such
+///   thresholds are `O(1)` in these units. `2^-20` is `9.5e-7` standard
+///   deviations: six orders of magnitude below the smallest threshold
+///   anyone sets.
+/// - **The statistics are not that sharp themselves.** `μ` and `σ` are
+///   sample statistics over [`CohortStats::selected`] scores, so `μ`
+///   alone carries a standard error of `σ/√N` — `1/√N` standard
+///   deviations, which is `0.058` at the recommended `top_n` of 300 and
+///   `0.71` at [`MIN_COHORT_SCORES`](crate::score_norm::MIN_COHORT_SCORES).
+///   The arithmetic tolerance sits some 60 000 times below the
+///   statistical one. Tightening it would buy nothing a caller could
+///   measure and would start refusing answers whose real uncertainty is
+///   somewhere else entirely.
+/// - **It leaves the reachable range alone.** The error bound is `2^-51`
+///   per unit of z-score magnitude, so this tolerance answers *every*
+///   trial whose two z-scores average below `2^31 ≈ 2.1e9`, however
+///   completely they cancel — an exactly zero result included. Cosine
+///   similarities span `[-1, 1]`, so at the
+///   [`DEFAULT_MIN_DEVIATION`](crate::score_norm::DEFAULT_MIN_DEVIATION)
+///   floor they cannot standardize past `2e6`: two thousandfold clear of
+///   the guard in the widest trial that floor admits at all, and six to
+///   nine orders of magnitude clear at any realistic cohort spread. The
+///   [module docs](crate::score_norm#accuracy) carry the measured
+///   figures.
+pub const MAX_NORMALIZED_ERROR: f64 = 1.0 / (1u64 << 20) as f64;
+
+/// Bound on the relative error a single z-score is carried with.
+///
+/// `(raw − μ) / σ` is two rounded operations, so the computed `q` sits
+/// within `2u(1 + 2u)` of the exact quotient with `u = 2^-53`. This
+/// constant is `2^-51`, twice that, and the doubling is what makes the
+/// bound usable as written: the second-order terms, the average's own
+/// rounding, and a quotient that lands in the subnormals all fit inside
+/// it rather than needing to be carried beside it.
+const Z_SCORE_RELATIVE_ERROR: f64 = 2.0 * f64::EPSILON;
+
+/// How far [`CohortStats::normalize`]'s returned value can sit from the
+/// exact average of the two z-scores it stands for.
+///
+/// A bound, not an estimate — see the [module
+/// docs](crate::score_norm#accuracy). It is worth being explicit about
+/// what it does *not* depend on: not on how badly the two sides cancelled,
+/// and not on the returned value at all. Cancellation is what makes the
+/// bound matter, never what makes it larger.
+pub(super) fn z_score_error_bound(z_self: f64, z_other: f64) -> f64 {
+  // `(|a| + |b|) / 2`, halved term by term. The average of two z-scores
+  // can be representable where their sum is not — that is the case
+  // `half_sum` exists for — so the magnitude must be formed the same way.
+  // Halving before the sum is exact for normals; for subnormals it can
+  // round, and cannot matter: a magnitude that small is `2^-1021` away
+  // from a tolerance whose floor is `MAX_NORMALIZED_ERROR`.
+  Z_SCORE_RELATIVE_ERROR * (0.5 * z_self.abs() + 0.5 * z_other.abs())
+}
+
+/// The error a successful normalization is allowed to carry:
+/// [`MAX_NORMALIZED_ERROR`], with an absolute floor of one standard
+/// deviation.
+///
+/// The floor is the load-bearing half. A purely relative criterion would
+/// refuse every result that legitimately cancels to near zero — which is
+/// precisely the region a match threshold sits in, and the region where a
+/// z-score's own absolute error is most obviously harmless.
+pub(super) fn permitted_error(normalized: f64) -> f64 {
+  MAX_NORMALIZED_ERROR * normalized.abs().max(1.0)
 }
 
 /// The exact power of two a side's scores are divided by before its mean

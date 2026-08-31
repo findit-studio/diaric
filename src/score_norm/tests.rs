@@ -3,8 +3,8 @@ use core::num::NonZeroUsize;
 use crate::{
   embed::{EMBEDDING_DIM, Embedding, cosine_similarity},
   score_norm::{
-    AsNormOptions, Cohort, CohortEntry, CohortStats, DEFAULT_TOP_N, Error, MIN_COHORT_SCORES,
-    as_norm,
+    AsNormOptions, Cohort, CohortEntry, CohortStats, DEFAULT_MIN_DEVIATION, DEFAULT_TOP_N, Error,
+    MAX_NORMALIZED_ERROR, MIN_COHORT_SCORES, as_norm,
   },
 };
 
@@ -37,6 +37,20 @@ fn pow2(e: i32) -> f64 {
 /// refused before it can be checked.
 fn tiniest_floor() -> f64 {
   f64::from_bits(1)
+}
+
+/// A deterministic xorshift64*, uniform in `[-1, 1)`. The sweeps want
+/// reproducible inputs, not good ones; the seed is the only thing that
+/// distinguishes one sweep's stream from another's.
+fn uniform_stream(seed: u64) -> impl FnMut() -> f64 {
+  let mut state = seed;
+  move || {
+    state ^= state >> 12;
+    state ^= state << 25;
+    state ^= state >> 27;
+    let v = state.wrapping_mul(0x2545_F491_4F6C_DD1D);
+    ((v >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+  }
 }
 
 /// Scoring closure for the identity cohorts below: the "item" *is* the
@@ -700,15 +714,7 @@ fn the_rescale_is_bit_neutral_in_the_cosine_regime() {
     (mean, (crate::ops::kahan_sum(&buf) / n).sqrt())
   }
 
-  // Deterministic xorshift64*, uniform in [-1, 1).
-  let mut state: u64 = 0x2545_F491_4F6C_DD1D;
-  let mut next = move || {
-    state ^= state >> 12;
-    state ^= state << 25;
-    state ^= state >> 27;
-    let v = state.wrapping_mul(0x2545_F491_4F6C_DD1D);
-    ((v >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
-  };
+  let mut next = uniform_stream(0x2545_F491_4F6C_DD1D);
 
   let options = opts(300).with_min_deviation(1e-15);
   let mut cohorts = 0usize;
@@ -833,15 +839,7 @@ fn the_shifted_numerator_is_halved_before_it_can_overflow() {
 /// exact-reference sweeps, not here.
 #[test]
 fn normalize_matches_the_naive_formula_bit_for_bit_in_the_cosine_regime() {
-  // Deterministic xorshift64*, uniform in [-1, 1).
-  let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
-  let mut next = move || {
-    state ^= state >> 12;
-    state ^= state << 25;
-    state ^= state >> 27;
-    let v = state.wrapping_mul(0x2545_F491_4F6C_DD1D);
-    ((v >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
-  };
+  let mut next = uniform_stream(0x9E37_79B9_7F4A_7C15);
 
   let options = opts(8).with_min_deviation(1e-15);
   let mut trials = 0usize;
@@ -1147,4 +1145,460 @@ fn a_one_ulp_spread_is_measured_exactly_across_the_exponent_range() {
     checked += 1;
   }
   assert_eq!(checked, 2_045, "the sweep must actually run: {checked}");
+}
+
+// ── Trap 11: an answer made entirely of rounding error ─────────────────
+
+/// `raw` for the cancellation case below. Nothing about it is special —
+/// it is the trial score the two cohorts were solved around.
+const CANCELLING_RAW: f64 = 0.3;
+
+/// A cohort whose selected pair is `[lo, hi]`, given as bit patterns so
+/// the inputs cannot be perturbed by a decimal literal's rounding.
+fn side_from_bits(lo: u64, hi: u64, options: &AsNormOptions) -> CohortStats {
+  CohortStats::from_scores([f64::from_bits(lo), f64::from_bits(hi)], options)
+    .expect("both cohorts clear the default deviation floor")
+}
+
+/// `x` as an exact `m * 2^e` with `m` odd (or zero).
+fn dyadic(x: f64) -> (i128, i32) {
+  assert!(x.is_finite(), "{x} is not finite");
+  if x == 0.0 {
+    return (0, 0);
+  }
+  let bits = x.to_bits();
+  let biased = ((bits >> 52) & 0x7ff) as i32;
+  let frac = i128::from(bits & 0x000f_ffff_ffff_ffff);
+  let (mut m, mut e) = if biased == 0 {
+    (frac, -1074)
+  } else {
+    (frac | (1i128 << 52), biased - 1075)
+  };
+  while m % 2 == 0 {
+    m /= 2;
+    e += 1;
+  }
+  if bits >> 63 == 1 { (-m, e) } else { (m, e) }
+}
+
+fn gcd(a: i128, b: i128) -> i128 {
+  let (mut a, mut b) = (a.abs(), b.abs());
+  while b != 0 {
+    let t = a % b;
+    a = b;
+    b = t;
+  }
+  a.max(1)
+}
+
+/// `(raw - mu) / sigma` as an exact reduced rational, denominator > 0.
+///
+/// Every step is integer arithmetic on the dyadic parts of the stored
+/// statistics, so nothing between the assertion and the module's own
+/// inputs is rounded. Panics rather than wrapping if a case needs more
+/// than `i128`, so an input this cannot represent exactly fails loudly.
+fn exact_z(raw: f64, mean: f64, deviation: f64) -> (i128, i128) {
+  let (mr, er) = dyadic(raw);
+  let (mm, em) = dyadic(mean);
+  let (ms, es) = dyadic(deviation);
+  assert!(ms > 0, "a stored deviation is positive");
+  let e = er.min(em);
+  assert!(er - e < 120 && em - e < 120, "exponent span exceeds i128");
+  let shift = |m: i128, k: i32| {
+    m.checked_mul(1i128 << k)
+      .unwrap_or_else(|| panic!("dyadic shift overflows i128"))
+  };
+  let numerator = shift(mr, er - e)
+    .checked_sub(shift(mm, em - e))
+    .expect("shifted difference fits i128");
+  // numerator * 2^e / (ms * 2^es)
+  let (mut num, mut den) = if e >= es {
+    (shift(numerator, e - es), ms)
+  } else {
+    (numerator, shift(ms, es - e))
+  };
+  let g = gcd(num, den);
+  num /= g;
+  den /= g;
+  (num, den)
+}
+
+/// The exact AS-Norm average of two sides, as a reduced rational with a
+/// positive denominator.
+fn exact_as_norm(raw: f64, a: &CohortStats, b: &CohortStats) -> (i128, i128) {
+  let (n1, d1) = exact_z(raw, a.mean(), a.deviation());
+  let (n2, d2) = exact_z(raw, b.mean(), b.deviation());
+  let num = n1
+    .checked_mul(d2)
+    .and_then(|l| n2.checked_mul(d1).and_then(|r| l.checked_add(r)))
+    .expect("cross-multiplied sum fits i128");
+  let den = d1
+    .checked_mul(d2)
+    .and_then(|d| d.checked_mul(2))
+    .expect("halved denominator fits i128");
+  let g = gcd(num, den);
+  (num / g, den / g)
+}
+
+/// Two sides whose z-scores are **adjacent floats of opposite sign** at
+/// `2^50`: their sum is exactly one ulp, so the entire returned value is
+/// a single rounding step of the two divisions — and its sign is not the
+/// answer's.
+///
+/// Both sides are ordinary: `from_scores` accepts them at the **default**
+/// `1e-6` floor, with deviations of `7 * 2^-22` and `11 * 2^-22`. Every
+/// intermediate stays finite, so neither the range-safety branches nor
+/// the finiteness postcondition can see anything wrong. The module
+/// returns `0.125`; the exact average of the two stored z-scores is
+/// `-6.75e-2`. A threshold at zero reads a non-match as a match.
+///
+/// Distributing the halving does not help — the error was made in the
+/// divisions, before any addition — so `0.5 * a + 0.5 * b` is `0.125`
+/// too. The cure has to be a refusal, not a reordering.
+#[test]
+fn cancelling_z_scores_are_refused_rather_than_returned_as_rounding_noise() {
+  let options = AsNormOptions::new();
+  let e = side_from_bits(0x41e0_2a33_6dc3_f818, 0x41e0_2a33_6dc3_f81f, &options);
+  let t = side_from_bits(0xc1e9_66e3_1a1b_4414, 0xc1e9_66e3_1a1b_4409, &options);
+  assert_eq!(e.deviation(), 7.0 * pow2(-22), "sigma_e");
+  assert_eq!(t.deviation(), 11.0 * pow2(-22), "sigma_t");
+  assert!(
+    e.deviation() > options.min_deviation() && t.deviation() > options.min_deviation(),
+    "both sides clear the default floor, so nothing earlier refuses them"
+  );
+
+  // The exact answer, from the stored statistics, by integer arithmetic.
+  let (num, den) = exact_as_norm(CANCELLING_RAW, &e, &t);
+  assert!(den > 0, "denominator normalised positive");
+  assert!(num < 0, "the exact average is negative: {num}/{den}");
+  // -0.0676 < exact < -0.0675, checked by cross-multiplication.
+  assert!(
+    num * 10_000 > -676 * den && num * 10_000 < -675 * den,
+    "exact average {num}/{den} is not -6.75e-2"
+  );
+
+  // Reordering cannot rescue it: the error was made in the divisions,
+  // before either term reached an addition, so distributing the halving
+  // returns the same wrong number the fused form does.
+  let z_e = (CANCELLING_RAW - e.mean()) / e.deviation();
+  let z_t = (CANCELLING_RAW - t.mean()) / t.deviation();
+  assert_eq!(
+    z_e.to_bits() ^ (1u64 << 63),
+    z_t.to_bits() - 1,
+    "adjacent ulps"
+  );
+  assert_eq!(z_e + z_t, 0.25, "the sum is exactly one ulp at 2^50");
+  assert_eq!(0.5 * (z_e + z_t), 0.125);
+  assert_eq!(
+    0.5 * z_e + 0.5 * z_t,
+    0.125,
+    "distributing the halving is no cure"
+  );
+
+  let err = as_norm(CANCELLING_RAW, &e, &t).expect_err("an answer made of rounding");
+  let Error::ZScoreCancellation(c) = err else {
+    panic!("expected ZScoreCancellation, got {err:?}");
+  };
+  assert_eq!(c.z_self(), z_e, "the offending z-scores are carried");
+  assert_eq!(c.z_other(), z_t);
+  assert_eq!(c.normalized(), 0.125, "and the value that was refused");
+  assert!(
+    c.error_bound() > c.tolerance(),
+    "the refusal is the bound exceeding the tolerance: {:e} vs {:e}",
+    c.error_bound(),
+    c.tolerance()
+  );
+  // The bound is not marginal here: it is five hundred thousand times the
+  // tolerance, and the true error (0.1925) is a third of the bound.
+  assert!(
+    c.error_bound() > 5e5 * c.tolerance(),
+    "bound {:e} is only {}x the tolerance",
+    c.error_bound(),
+    c.error_bound() / c.tolerance()
+  );
+  assert!(err.to_string().contains("cancel to"), "message: {err}");
+}
+
+/// The exact average of the two z-scores, recovered with error-free
+/// transformations rather than asserted.
+///
+/// `f64::mul_add` gives `d − q·σ` exactly, Knuth's two-sum gives the
+/// subtraction's residual exactly, and the crate's compensated sum adds
+/// the four terms without losing them again. The result is good to about
+/// `2^-104` relative — some fifty binades finer than the `2^-51` bound it
+/// exists to check, so it can serve as the reference for it.
+///
+/// This is the machinery [`CohortStats::normalize`] deliberately does not
+/// carry; here it costs nothing, because a test is not on anyone's hot
+/// path.
+fn oracle_as_norm(raw: f64, a: &CohortStats, b: &CohortStats) -> f64 {
+  fn exact_terms(raw: f64, mean: f64, sigma: f64) -> (f64, f64) {
+    // Two-sum of `raw + (-mean)`: `residual` is exact.
+    let d = raw - mean;
+    let split = d - raw;
+    let residual = (raw - (d - split)) + (-mean - split);
+    let q = d / sigma;
+    // `d - q * sigma`, exact under a single rounding.
+    let quotient_residual = (-q).mul_add(sigma, d);
+    (q, (residual + quotient_residual) / sigma)
+  }
+  let (q_a, e_a) = exact_terms(raw, a.mean(), a.deviation());
+  let (q_b, e_b) = exact_terms(raw, b.mean(), b.deviation());
+  0.5 * crate::ops::kahan_sum(&[q_a, q_b, e_a, e_b])
+}
+
+/// The accuracy claim, checked against the error-free reference rather
+/// than restated: whenever `normalize` returns, the returned value really
+/// is within [`z_score_error_bound`] of the exact average.
+///
+/// The sweep is built to press on the bound, not to sit comfortably
+/// inside it — deviations that are odd multiples of a power of two, so
+/// both divisions round, at scales from `2^-40` to `2^40`, with trial
+/// scores placed both far from the two means (no cancellation, where the
+/// answer's own rounding adds to the inherited error) and between them
+/// (cancellation, where only the inherited error survives). The second
+/// assertion is what keeps the first honest: if no case came near the
+/// bound, a bound half the size would pass too.
+#[test]
+fn the_error_bound_really_bounds_the_error() {
+  let options = opts(2).with_min_deviation(tiniest_floor());
+  let mut next = uniform_stream(0x9E37_79B9_7F4A_7C15);
+  let mut worst = 0.0f64;
+  let mut checked = 0usize;
+  for e in (-40i32..=40).step_by(1) {
+    let unit = pow2(e);
+    for &k in &[3.0f64, 5.0, 7.0, 11.0, 13.0] {
+      let sigma = k * unit;
+      // A side centred on `centre` with deviation `sigma`.
+      let side = |centre: f64| CohortStats::from_scores([centre - sigma, centre + sigma], &options);
+      for &offset in &[0.0f64, 1.0, 7.0, 1e5, 1e9] {
+        let Ok(a) = side(offset * unit) else { continue };
+        let Ok(b) = side(-offset * unit * 1.5 + unit) else {
+          continue;
+        };
+        for _ in 0..6 {
+          // Both regimes: a raw score near the two means, and one far
+          // enough out that the average does not cancel at all.
+          for raw in [
+            next() * offset.max(1.0) * unit,
+            next() * offset.max(1.0) * unit * 1e6,
+          ] {
+            let Ok(got) = as_norm(raw, &a, &b) else {
+              continue;
+            };
+            // The direct form is `z_score`'s answer only where the shift
+            // does not overflow; assert that rather than assume it, or a
+            // case that took the rescaled branch would be measured
+            // against an infinite bound and pass for the wrong reason.
+            assert!(
+              (raw - a.mean()).is_finite() && (raw - b.mean()).is_finite(),
+              "the sweep must stay on the direct branch (raw {raw:e})"
+            );
+            let bound = crate::score_norm::stats::z_score_error_bound(
+              (raw - a.mean()) / a.deviation(),
+              (raw - b.mean()) / b.deviation(),
+            );
+            let exact = oracle_as_norm(raw, &a, &b);
+            let error = (exact - got).abs();
+            assert!(
+              error <= bound,
+              "error {error:e} exceeds the bound {bound:e} (raw {raw:e}, sigma {sigma:e})"
+            );
+            if bound > 0.0 {
+              worst = worst.max(error / bound);
+            }
+            checked += 1;
+          }
+        }
+      }
+    }
+  }
+  assert!(checked > 5_000, "the sweep must actually run: {checked}");
+  assert!(
+    worst > 0.45,
+    "no case came near the bound (worst {worst:.4}), so it is not being tested"
+  );
+}
+
+/// The property the absolute floor in [`permitted_error`] exists for: a
+/// trial whose two sides cancel **exactly** is still answered, at every
+/// magnitude the guard admits.
+///
+/// Side `a` is centred on zero with `σ = 1`, so its z-score is `raw`;
+/// side `b` is centred on `2·raw`, so its z-score is `-raw`. The average
+/// is exactly `0` — the value a match threshold sits closest to, and the
+/// one a purely relative accuracy criterion would refuse for having no
+/// significant digits left. It has no digits because it is zero.
+#[test]
+fn an_exactly_cancelling_pair_is_answered_at_every_admissible_magnitude() {
+  let options = opts(2);
+  let mut checked = 0usize;
+  for e in 0i32..=31 {
+    let raw = pow2(e);
+    let a = CohortStats::from_scores([-1.0, 1.0], &options).expect("centred side");
+    let b = CohortStats::from_scores([2.0 * raw - 1.0, 2.0 * raw + 1.0], &options)
+      .expect("side centred on 2*raw");
+    assert_eq!(a.mean(), 0.0);
+    assert_eq!(a.deviation(), 1.0);
+    assert_eq!(b.mean(), 2.0 * raw, "mu_b at 2^{e}");
+    assert_eq!(b.deviation(), 1.0, "sigma_b at 2^{e}");
+    assert_eq!(
+      as_norm(raw, &a, &b).unwrap_or_else(|err| panic!("refused 2^{e}: {err}")),
+      0.0,
+      "z-scores of +/-2^{e} average to exactly zero"
+    );
+    checked += 1;
+  }
+  assert_eq!(checked, 32, "the sweep must actually run");
+}
+
+/// The admissible region reaches exactly `2^31`, checked one ulp either
+/// side of it.
+///
+/// With the construction above the two z-scores are `±raw`, so
+/// `mag == raw` and the bound is `2^-51 · raw` against a tolerance of
+/// `MAX_NORMALIZED_ERROR`. At `raw = 2^31` the two are equal and the
+/// trial is answered; one ulp higher the bound wins. This is the
+/// predicate's boundary rather than its middle, so a `>` quietly becoming
+/// a `>=` has somewhere to fail.
+#[test]
+fn the_admissible_z_magnitude_is_exactly_two_to_the_thirty_first() {
+  let options = opts(2);
+  let a = CohortStats::from_scores([-1.0, 1.0], &options).expect("centred side");
+  let admissible = pow2(31);
+  let over = admissible + pow2(-21); // one ulp at 2^31
+
+  for (raw, answered) in [(admissible, true), (over, false)] {
+    let b = CohortStats::from_scores([2.0 * raw - 1.0, 2.0 * raw + 1.0], &options)
+      .expect("side centred on 2*raw");
+    assert_eq!(b.mean(), 2.0 * raw, "mu_b");
+    assert_eq!(b.deviation(), 1.0, "sigma_b");
+    assert_eq!(
+      as_norm(raw, &a, &b).is_ok(),
+      answered,
+      "raw {raw:e} should {} be answered",
+      if answered { "" } else { "not" }
+    );
+  }
+  assert_eq!(
+    crate::score_norm::stats::z_score_error_bound(admissible, -admissible),
+    MAX_NORMALIZED_ERROR,
+    "2^-51 * 2^31 is exactly the tolerance floor"
+  );
+}
+
+/// The number that decides whether this guard is worth having: how close
+/// the regimes this module was *measured* on come to firing it.
+///
+/// A guard that trips on real cosine or PLDA scores would be worse than
+/// the defect it prevents, so the margin is asserted rather than
+/// described. Each regime reports `error_bound / permitted_error`; the
+/// pinned ceilings are just above the measured worst case, so a change
+/// that moves the guard toward real data fails here first.
+#[test]
+fn the_guard_stays_orders_of_magnitude_clear_of_every_measured_regime() {
+  fn worst_ratio(sides: &[(CohortStats, CohortStats, f64)]) -> f64 {
+    let mut worst = 0.0f64;
+    for (a, b, raw) in sides {
+      let z_a = (raw - a.mean()) / a.deviation();
+      let z_b = (raw - b.mean()) / b.deviation();
+      let got = as_norm(*raw, a, b).expect("every regime here is answered");
+      worst = worst.max(
+        crate::score_norm::stats::z_score_error_bound(z_a, z_b)
+          / crate::score_norm::stats::permitted_error(got),
+      );
+    }
+    worst
+  }
+
+  // Cosine, across the spreads the bit-neutrality sweep uses, at a floor
+  // low enough to admit the tightest of them.
+  let options = opts(8).with_min_deviation(1e-15);
+  let mut next = uniform_stream(0x9E37_79B9_7F4A_7C15);
+  for spread in [1e-9f64, 1e-6, 1e-3, 1e-1, 5e-1] {
+    let mut cases = Vec::new();
+    for _ in 0..400 {
+      let base_e = next() * 0.5;
+      let e: Vec<f64> = (0..8).map(|_| base_e + spread * next()).collect();
+      let base_t = next() * 0.5;
+      let t: Vec<f64> = (0..8).map(|_| base_t + spread * next()).collect();
+      let raw = next();
+      if let (Ok(e), Ok(t)) = (
+        CohortStats::from_scores(e, &options),
+        CohortStats::from_scores(t, &options),
+      ) {
+        cases.push((e, t, raw));
+      }
+    }
+    assert!(
+      cases.len() > 350,
+      "spread {spread:e} produced {}",
+      cases.len()
+    );
+    let worst = worst_ratio(&cases);
+    assert!(
+      worst < 1e-6,
+      "cosine spread {spread:e} reaches {worst:e} of the guard"
+    );
+  }
+
+  // The crate's own tight-cluster-at-1e8 cohort, and PLDA-scale
+  // log-likelihood ratios.
+  let wide = opts(4);
+  let cluster_a = CohortStats::from_scores([1e8 + 1.0, 1e8 + 2.0, 1e8 + 3.0, 1e8 + 4.0], &wide)
+    .expect("tight cluster");
+  let cluster_b = CohortStats::from_scores([1e8 + 1.0, 1e8 + 2.0, 1e8 + 3.5, 1e8 + 4.0], &wide)
+    .expect("tight cluster");
+  let cluster: Vec<_> = [0.8f64, 1e8, 1e8 + 2.5, -1e8]
+    .into_iter()
+    .map(|raw| (cluster_a, cluster_b, raw))
+    .collect();
+  assert!(
+    worst_ratio(&cluster) < 1e-8,
+    "the tight cluster reaches {:e} of the guard",
+    worst_ratio(&cluster)
+  );
+
+  let mut plda = Vec::new();
+  for _ in 0..400 {
+    let base_e = next() * 30.0;
+    let e: Vec<f64> = (0..8).map(|_| base_e + 8.0 * next()).collect();
+    let base_t = next() * 30.0;
+    let t: Vec<f64> = (0..8).map(|_| base_t + 8.0 * next()).collect();
+    let raw = next() * 40.0;
+    if let (Ok(e), Ok(t)) = (
+      CohortStats::from_scores(e, &opts(8)),
+      CohortStats::from_scores(t, &opts(8)),
+    ) {
+      plda.push((e, t, raw));
+    }
+  }
+  assert!(plda.len() > 350, "PLDA regime produced {}", plda.len());
+  assert!(
+    worst_ratio(&plda) < 1e-7,
+    "the PLDA regime reaches {:e} of the guard",
+    worst_ratio(&plda)
+  );
+
+  // The worst case the *default* floor admits at all, constructed rather
+  // than sampled: two cosine sides with sigma exactly on the floor and
+  // means placed symmetrically about the trial score, so the cancellation
+  // is total and the z-scores are as large as `[-1, 1]` permits.
+  let floor = DEFAULT_MIN_DEVIATION;
+  let pinned = opts(2);
+  // A hair over `2 * floor`, because `-1.0 + 2e-6` rounds the span a few
+  // ulps short of it and the side would be refused as degenerate before
+  // it could be measured.
+  let span = 2.0 * floor * (1.0 + 1e-9);
+  let a = CohortStats::from_scores([-1.0, -1.0 + span], &pinned).expect("side at the floor");
+  let b = CohortStats::from_scores([1.0 - span, 1.0], &pinned).expect("side at the floor");
+  assert!(
+    a.deviation() < 1.01 * floor && b.deviation() < 1.01 * floor,
+    "sigma on the floor"
+  );
+  let worst = worst_ratio(&[(a, b, 0.0)]);
+  assert!(
+    worst < 1e-3,
+    "the widest cosine trial the default floor admits reaches {worst:e} of the guard"
+  );
 }
