@@ -36,6 +36,7 @@ never pull in a native ML runtime.
 | `aggregate` / `reconstruct` | Speaker counting and frame-level reconstruction → RTTM spans. |
 | `segment` | The sans-I/O `Segmenter` windowing/hysteresis state machine, powerset decoding, and option constants (the ONNX `SegmentModel` runner stays in `diarization`). |
 | `embed` | The `Embedding` value types and the bit-exact torchaudio kaldi-fbank DSP (the ONNX `EmbedModel` runner stays in `diarization`). |
+| `score_norm` | Adaptive score normalization (AS-Norm1). Rescales trial scores against a cohort distribution so one threshold means the same thing for every speaker. Generic over the score source — no embedding dimension in its surface. |
 | `ops` / `spill` | Three-tier (scalar / NEON / AVX2 / AVX-512) numeric primitives and the file-backed mmap spill backend for pathological-size inputs. |
 | `provenance` | Model/PLDA identity metadata. |
 
