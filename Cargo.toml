@@ -80,13 +80,23 @@ _bench = []
 # bare-name arithmetic with `checked_`/`saturating_` rungs and corrected
 # the rounding to nearest-with-ties-away-from-zero (`AV_ROUND_NEAR_INF`);
 # diaric constructs timebases and ranges but never rescales, so only the
-# denominator's type reaches this crate.
-mediatime = "0.3"
+# denominator's type reaches this crate. 0.4 is additive only: it adds an
+# unsigned `Duration` beside `SignedDuration` and, to claim that name,
+# respells the standard type as an internal `StdDuration` alias — the same
+# `core::time::Duration`, so every existing signature keeps its types.
+mediatime = "0.4"
 thiserror = "2"
 
 # Real-valued FFT for the bit-exact torchaudio.compliance.kaldi.fbank port
 # (see `src/embed/fbank.rs`).
 realfft = "3"
+
+# Public dependency: `cluster::hungarian::constrained_argmax`,
+# `cluster::centroid::weighted_centroids` and `cluster::vbx`'s
+# `vbx_iterate` / `VbxOutput` carry `DMatrix<f64>`, `DVector<f64>` and
+# `DMatrixView<'_, f64>` across the API boundary. A major bump here is a
+# breaking change for callers even when no diaric signature moves, because
+# the matrix types are not interchangeable across nalgebra versions.
 nalgebra = "0.35"
 rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
