@@ -42,11 +42,11 @@ never pull in a native ML runtime.
 
 ## Usage
 
-Until published to crates.io, depend on a pinned git revision:
+Add `diaric` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-diaric = "0.1"
+diaric = "0.2"
 ```
 
 Enable `serde` for `Serialize`/`Deserialize` on the public `*Options`
