@@ -57,7 +57,7 @@ types.
 | Feature | Default | What it enables |
 |---------|---------|-----------------|
 | `serde` | no | `Serialize`/`Deserialize` impls for the public `*Options` types. `Duration` fields serialize as humantime strings ("250ms", "1.5s"). |
-| `_bench` | no | Internal — exposes `pub(crate)` kernel modules to the `benches/*.rs` harnesses. Not part of the public API. |
+| `_bench` | no | Internal — exposes the crate-private `ops` numeric layer (plus `ops::pdist_euclidean`) to the `benches/*.rs` harnesses. `ops` is the only module it affects, and the only one outside the public API; `cluster`, `pipeline`, `reconstruct` and `plda` are public surface under semver. |
 
 There is deliberately **no** `ort` / `tch` / execution-provider feature: the
 model runners that need them are in `diarization`.

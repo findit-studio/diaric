@@ -2,6 +2,39 @@
 
 # 0.2.0 (September 1st, 2026)
 
+PUBLIC API
+
+- **What this crate binds under semver.** `cluster` (with its `ahc`,
+  `centroid`, `hungarian`, `online` and `vbx` submodules), `pipeline`,
+  `reconstruct`, `plda`, `aggregate`, `offline`, `segment`, `embed`,
+  `provenance`, `spill`, and — new in this release — `score_norm` are
+  unconditionally `pub`. They are public surface, not incidental
+  exposure: a breaking change to any of them moves the crate version.
+  Every one but `score_norm` was already `pub` in the released 0.1.0, so
+  this records the existing contract rather than extending it. `ops` is
+  the sole exception and stays crate-private — it is `pub` only under
+  the internal, `doc(hidden)` `_bench` feature, which promises nothing;
+  the two re-exports out of it, `axpy_f32` at the crate root and the
+  `spill` module's types, are public. Direct use of the `cluster`
+  submodules remains uncommon — `pipeline` and `offline` are the
+  supported entrypoints — but uncommon is not unstable. 0.1.0's feature
+  table called the kernel modules internal and disclaimed the public
+  API for them; that was wrong, and it and the manifest comment behind
+  it are corrected here.
+
+- **Every `nalgebra` major bump is a breaking change for this crate.** A
+  known cost, not a defect. `pipeline::AssignEmbeddingsInput::phi`,
+  `cluster::hungarian::constrained_argmax`,
+  `cluster::centroid::weighted_centroids`, and `cluster::vbx`'s
+  `vbx_iterate` and `VbxOutput` (`new`, `gamma`, `pi`, `into_parts`)
+  hand `DMatrix<f64>`, `DVector<f64>` and `DMatrixView<'_, f64>` across
+  the API boundary, so nalgebra is a public dependency and its versions
+  are not interchangeable. The `0.34 → 0.35` bump below is exactly that,
+  it recurs on every future nalgebra major, and a downstream pinning
+  nalgebra must move in lockstep. Wrapping those accessors in owned
+  types would sever the coupling; that is API design work and is not
+  attempted here.
+
 CHANGED
 
 - **`mediatime` `0.1` → `0.4`.** mediatime is a public dependency —

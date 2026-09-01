@@ -63,11 +63,18 @@ default = []
 # profiles). `Duration` fields go through `humantime-serde` ("250ms" / "1.5s"
 # rather than raw nanos). Off by default to keep the default dep graph minimal.
 serde = ["dep:serde", "dep:humantime-serde"]
-# Internal feature for benchmarks. Exposes `pub(crate)` kernel modules
-# (`vbx`, `ahc`, `centroid`, `pipeline`, `reconstruct`, `hungarian`, `plda`,
-# `ops`) as `pub` so external benches in `benches/*.rs` can call the inner
-# kernels directly. Not part of the public API contract — the `_` prefix
-# marks it as private.
+# Internal feature for benchmarks. Flips the crate-private `ops` module —
+# the scalar/SIMD numeric layer — from `pub(crate)` to `pub`, marks it
+# `doc(hidden)`, and re-exports `ops::pdist_euclidean`, which is otherwise
+# `cfg(test)`-only. `benches/ops.rs` needs both to A/B the dispatched
+# kernels against `ops::scalar::*`; `benches/ahc.rs` reaches
+# `ops::spill::SpillOptions` through it. `ops` is the ONLY module the
+# feature affects, and `ops` is the only module outside the public API
+# contract — the `_` prefix marks the feature private. The algorithm
+# modules the other benches call (`cluster` and its submodules,
+# `pipeline`, `reconstruct`, `plda`) are unconditionally `pub` and are
+# public surface under semver; see the PUBLIC API section of CHANGELOG
+# 0.2.0.
 _bench = []
 
 [dependencies]
