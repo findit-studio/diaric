@@ -108,8 +108,8 @@ pub(super) fn load_plda() -> PldaWeights {
 fn bytes_to_vector(bytes: &[u8], len: usize) -> DVector<f64> {
   debug_assert_eq!(bytes.len(), len * 8);
   let mut v = DVector::<f64>::zeros(len);
-  for (i, chunk) in bytes.chunks_exact(8).enumerate() {
-    v[i] = f64::from_le_bytes(chunk.try_into().expect("chunk_exact yields 8 bytes"));
+  for (i, chunk) in bytes.as_chunks::<8>().0.iter().enumerate() {
+    v[i] = f64::from_le_bytes(*chunk);
   }
   v
 }
@@ -123,10 +123,8 @@ fn bytes_to_vector(bytes: &[u8], len: usize) -> DVector<f64> {
 fn bytes_to_row_major_matrix(bytes: &[u8], rows: usize, cols: usize) -> DMatrix<f64> {
   debug_assert_eq!(bytes.len(), rows * cols * 8);
   let mut data = Vec::with_capacity(rows * cols);
-  for chunk in bytes.chunks_exact(8) {
-    data.push(f64::from_le_bytes(
-      chunk.try_into().expect("chunk_exact yields 8 bytes"),
-    ));
+  for chunk in bytes.as_chunks::<8>().0 {
+    data.push(f64::from_le_bytes(*chunk));
   }
   DMatrix::from_row_slice(rows, cols, &data)
 }
