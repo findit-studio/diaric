@@ -4,8 +4,8 @@
 <div align="center">
 
 The backend-free speaker-diarization core: clustering, PLDA, pipeline
-assembly, reconstruction, fbank DSP and SIMD/mmap numeric ops — with **no
-ONNX/Torch dependency**.
+assembly, reconstruction, fbank DSP, score normalization and SIMD/mmap
+numeric ops — with **no ONNX/Torch dependency**.
 
 </div>
 
@@ -16,8 +16,9 @@ ONNX/Torch dependency**.
 holds everything that computes over already-produced tensors and audio —
 speaker clustering, PLDA projection, the offline diarization assembly,
 frame reconstruction / RTTM emission, the kaldi-compatible fbank feature
-extractor, and the shared numeric kernels — but **none** of the ONNX
-Runtime (`ort`) or LibTorch (`tch`) model runners.
+extractor, adaptive score normalization, and the shared numeric kernels —
+but **none** of the ONNX Runtime (`ort`) or LibTorch (`tch`) model
+runners.
 
 The segmentation and embedding **model runners** (`SegmentModel`,
 `EmbedModel`) and the streaming service layer live in the `diarization`
@@ -83,7 +84,7 @@ attribution record.
 | **MIT OR Apache-2.0** | The original `diaric` / `diarization` Rust code (caller's choice). | — |
 | **Apache-2.0** | `cluster::online` — the greedy online centroid matcher, a source port of FluidAudio's `SpeakerManager`. A **mandatory** obligation, not the OR branch above: choosing MIT for the original code does not discharge it. | [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0), FluidInference Team. |
 | **MIT** | The offline `cluster` flow (AHC/VBx/spectral/centroid), `pipeline`, `reconstruct`, `aggregate`, the `segment` post-processing, and the PLDA math — algorithm ports of `pyannote.audio`. | [pyannote/pyannote-audio](https://github.com/pyannote/pyannote-audio) (MIT) |
-| **CC-BY-4.0** | `models/plda/*.bin` — PLDA weights **embedded into the compiled binary** via `include_bytes!` (`src/plda/loader.rs`). Attribution is **required** in any redistributed binary. | [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1); trained by BUT Speech@FIT. See [models/plda/SOURCE.md](models/plda/SOURCE.md). |
+| **CC-BY-4.0** | `models/plda/*.bin` — PLDA weights **embedded into the compiled binary** via `include_bytes!` (`src/plda/loader.rs`). Attribution is **required** in any redistributed binary. | [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1); trained by BUT Speech@FIT. See [models/plda/SOURCE.md](https://github.com/findit-studio/diaric/blob/main/models/plda/SOURCE.md). |
 | **BSD-2-Clause** | `src/embed/fbank.rs` — a port of `torchaudio.compliance.kaldi.fbank` (torchaudio 2.11). torchaudio is BSD-2-Clause. | PyTorch/torchaudio (BSD-2-Clause), © 2017 Facebook Inc. (Soumith Chintala). |
 | **BSD-3-Clause** | `src/cluster/hungarian/lsap.rs` (a port of SciPy's `rectangular_lsap.cpp`) and the scipy-derived PLDA eigenvector blobs (`eigenvectors_desc`, `phi_desc`). | SciPy `scipy.optimize` (BSD-3-Clause). |
 
