@@ -19,8 +19,8 @@
 //!
 //! - [`scalar`] — always-compiled reference implementation. The math
 //!   contract is anchored here.
-//! - [`arch::neon`] — aarch64 NEON.
-//! - [`arch::x86_avx2`], [`arch::x86_avx512`] — x86_64 tiers.
+//! - `arch::neon` — aarch64 NEON.
+//! - `arch::x86_avx2`, `arch::x86_avx512` — x86_64 tiers.
 //! - wasm32 falls through to scalar (no SIMD backend wired).
 //!
 //! Public dispatchers in [`self`] (`dot`, `axpy`, `logsumexp_row`)
@@ -47,7 +47,7 @@
 //! ## Cross-architecture determinism
 //!
 //! - **NEON ≡ scalar bit-exact** on aarch64 (`f64::mul_add` 4-acc
-//!   tree on both). Verified by [`differential_tests`].
+//!   tree on both). Verified by `differential_tests` (`cfg(test)`).
 //! - **AVX2/AVX-512 diverge from scalar** by O(1e-15) relative on
 //!   well-conditioned inputs (different reduction trees).
 //! - **`nalgebra`/matrixmultiply GEMMs** in VBx have their own
@@ -56,6 +56,12 @@
 //!   against ulp drift is validated empirically by `parity_tests`
 //!   modules (DER ≤ 0.4% on all 6 captured fixtures, every arch).
 
+// `arch`'s submodules are `pub(crate)` and each is gated on its own target
+// arch, so the module docs above name them as code spans rather than
+// intra-doc links: no single doc build resolves both the aarch64 and the
+// x86_64 backends (`arch::neon` is absent on x86_64, `arch::x86_avx*` on
+// aarch64), and `differential_tests` is `cfg(test)`, so rustdoc never sees
+// it at all. Re-adding the brackets breaks `RUSTDOCFLAGS=-D warnings`.
 pub(crate) mod arch;
 mod dispatch;
 pub mod scalar;

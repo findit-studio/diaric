@@ -16,9 +16,10 @@ use crate::{
 };
 
 /// Build a minimal valid `OfflineInput`-shaped data set: well-formed
-/// raw_embeddings + segmentations matching `num_chunks * num_speakers
-/// * num_frames_per_chunk`, default sliding windows, with the count
-/// tensor controlled by the caller. The PLDA transform is bundled.
+/// raw_embeddings + segmentations matching
+/// `num_chunks * num_speakers * num_frames_per_chunk`, default sliding
+/// windows, with the count tensor controlled by the caller. The PLDA
+/// transform is bundled.
 fn synthetic_inputs(
   num_chunks: usize,
   num_frames_per_chunk: usize,

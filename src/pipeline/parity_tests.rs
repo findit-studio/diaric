@@ -329,12 +329,12 @@ fn diagnose_pipeline_per_chunk_10_mrbeast() {
     }
   }
   eprintln!("[diag_chunk] co-occurrence matrix (got→want):");
-  for g in 0..8usize {
+  for (g, row) in cooc.iter().enumerate() {
     let mut s = format!("  got={g}: ");
     let mut empty = true;
-    for w in 0..8usize {
-      if cooc[g][w] > 0 {
-        s.push_str(&format!("[{w}={}]", cooc[g][w]));
+    for (w, &n) in row.iter().enumerate() {
+      if n > 0 {
+        s.push_str(&format!("[{w}={n}]"));
         empty = false;
       }
     }
@@ -610,7 +610,7 @@ fn diagnose_pipeline_divergence_10_mrbeast() {
   // Compute dia's soft_clusters [num_chunks][num_speakers, num_alive] like
   // stage 6 of assign_embeddings, then summarize element-wise error.
   let mut dia_soft = vec![vec![0.0_f64; num_speakers * num_alive]; num_chunks];
-  for c in 0..num_chunks {
+  for (c, soft_c) in dia_soft.iter_mut().enumerate() {
     for sp in 0..num_speakers {
       let row = c * num_speakers + sp;
       let emb_row = &raw_flat[row * embed_dim..(row + 1) * embed_dim];
@@ -635,7 +635,7 @@ fn diagnose_pipeline_divergence_10_mrbeast() {
         } else {
           1.0 - dot / denom
         };
-        dia_soft[c][sp * num_alive + k] = 2.0 - dist;
+        soft_c[sp * num_alive + k] = 2.0 - dist;
       }
     }
   }
@@ -729,10 +729,10 @@ fn diagnose_pipeline_divergence_10_mrbeast() {
     use nalgebra::DMatrix;
     // Compute dia's soft_min over all dia_soft entries.
     let mut soft_min = f64::INFINITY;
-    for c in 0..num_chunks {
+    for soft_c in &dia_soft {
       for sp in 0..num_speakers {
         for k in 0..num_alive {
-          let v = dia_soft[c][sp * num_alive + k];
+          let v = soft_c[sp * num_alive + k];
           if v < soft_min {
             soft_min = v;
           }
