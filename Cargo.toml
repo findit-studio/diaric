@@ -33,7 +33,7 @@ license = "(MIT OR Apache-2.0) AND Apache-2.0 AND MIT AND CC-BY-4.0 AND BSD-2-Cl
 repository = "https://github.com/findit-studio/diaric"
 homepage = "https://github.com/findit-studio/diaric"
 documentation = "https://docs.rs/diaric"
-description = "Backend-free speaker-diarization core: clustering (offline AHC→VBx, online), PLDA projection, pipeline assembly, reconstruction/RTTM, kaldi-fbank DSP and embedding types, plus SIMD/mmap numeric ops. The ONNX/Torch model runners live in the `diarization` crate."
+description = "Backend-free speaker-diarization core: clustering (offline AHC→VBx, online), PLDA projection, pipeline assembly, reconstruction/RTTM, kaldi-fbank DSP and embedding types, adaptive score normalization (AS-Norm1), plus SIMD/mmap numeric ops. The ONNX/Torch model runners live in the `diarization` crate."
 readme = "README.md"
 # Keep `cargo package` lean. The PLDA `.bin` blobs (~530 KB) ship because
 # they are `include_bytes!`-embedded at runtime; everything else dev-only is
@@ -58,16 +58,23 @@ exclude = [
 
 [features]
 default = []
-# `Serialize`/`Deserialize` impls for the public `*Options` / `*Config`
-# types so callers can persist diarization configuration (e.g. JSON/TOML/YAML
-# profiles). `Duration` fields go through `humantime-serde` ("250ms" / "1.5s"
-# rather than raw nanos). Off by default to keep the default dep graph minimal.
+# `Serialize`/`Deserialize` impls for the public `*Options` types so callers
+# can persist diarization configuration (e.g. JSON/TOML/YAML profiles).
+# `Duration` fields go through `humantime-serde` ("250ms" / "1.5s" rather
+# than raw nanos). Off by default to keep the default dep graph minimal.
 serde = ["dep:serde", "dep:humantime-serde"]
-# Internal feature for benchmarks. Exposes `pub(crate)` kernel modules
-# (`vbx`, `ahc`, `centroid`, `pipeline`, `reconstruct`, `hungarian`, `plda`,
-# `ops`) as `pub` so external benches in `benches/*.rs` can call the inner
-# kernels directly. Not part of the public API contract — the `_` prefix
-# marks it as private.
+# Internal feature for benchmarks. Flips the crate-private `ops` module —
+# the scalar/SIMD numeric layer — from `pub(crate)` to `pub`, marks it
+# `doc(hidden)`, and re-exports `ops::pdist_euclidean`, which is otherwise
+# `cfg(test)`-only. `benches/ops.rs` needs both to A/B the dispatched
+# kernels against `ops::scalar::*`; `benches/ahc.rs` reaches
+# `ops::spill::SpillOptions` through it. `ops` is the ONLY module the
+# feature affects, and `ops` is the only module outside the public API
+# contract — the `_` prefix marks the feature private. The algorithm
+# modules the other benches call (`cluster` and its submodules,
+# `pipeline`, `reconstruct`, `plda`) are unconditionally `pub` and are
+# public surface under semver; see the PUBLIC API section of CHANGELOG
+# 0.2.0.
 _bench = []
 
 [dependencies]
@@ -80,13 +87,23 @@ _bench = []
 # bare-name arithmetic with `checked_`/`saturating_` rungs and corrected
 # the rounding to nearest-with-ties-away-from-zero (`AV_ROUND_NEAR_INF`);
 # diaric constructs timebases and ranges but never rescales, so only the
-# denominator's type reaches this crate.
-mediatime = "0.3"
+# denominator's type reaches this crate. 0.4 is additive only: it adds an
+# unsigned `Duration` beside `SignedDuration` and, to claim that name,
+# respells the standard type as an internal `StdDuration` alias — the same
+# `core::time::Duration`, so every existing signature keeps its types.
+mediatime = "0.4"
 thiserror = "2"
 
 # Real-valued FFT for the bit-exact torchaudio.compliance.kaldi.fbank port
 # (see `src/embed/fbank.rs`).
 realfft = "3"
+
+# Public dependency: `cluster::hungarian::constrained_argmax`,
+# `cluster::centroid::weighted_centroids` and `cluster::vbx`'s
+# `vbx_iterate` / `VbxOutput` carry `DMatrix<f64>`, `DVector<f64>` and
+# `DMatrixView<'_, f64>` across the API boundary. A major bump here is a
+# breaking change for callers even when no diaric signature moves, because
+# the matrix types are not interchangeable across nalgebra versions.
 nalgebra = "0.35"
 rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
@@ -118,7 +135,7 @@ rustix = { version = "1", features = ["fs"] }
 # `[target.'cfg(...)']` block above — that block scopes its entries to
 # Linux/Android only.
 
-# `serde` impls for the public `*Options` / `*Config` types.
+# `serde` impls for the public `*Options` types.
 [dependencies.serde]
 version = "1"
 optional = true
