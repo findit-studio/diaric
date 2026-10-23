@@ -91,7 +91,7 @@ _bench = []
 # unsigned `Duration` beside `SignedDuration` and, to claim that name,
 # respells the standard type as an internal `StdDuration` alias — the same
 # `core::time::Duration`, so every existing signature keeps its types.
-mediatime = "0.4"
+mediatime = "0.5"
 thiserror = "2"
 
 # Real-valued FFT for the bit-exact torchaudio.compliance.kaldi.fbank port
